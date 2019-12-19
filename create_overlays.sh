@@ -3,7 +3,6 @@
 set -euo pipefail
 
 MACHINES="cutman gutsman iceman bombman fireman elecman metalman airman bubbleman quickman crashman flashman"
-EXTENTS=39744
 VGROUP=bigdisks
 BASE_IMAGE=gamestation-win7
 EXPORT_DEVS=/dev/gamestations
@@ -76,11 +75,9 @@ function doit {
 
 if [ $ONLYONE == yes ]; then
   MACHINES=$UPDATES_MACHINE
-  EXTENTS=476932
   PAGECACHE=no
 elif [ $ONLYTWO == yes ]; then
   MACHINES='crashman flashman'
-  EXTENTS=238466
   PAGECACHE=no
 fi
 
@@ -119,6 +116,14 @@ else
 fi
 
 MASTER_SIZE=$(blockdev --getsz /dev/$VGROUP/$BASE_IMAGE)
+
+if [ "$OVERLAY_DEVICE" != "" ]; then
+  FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
+else
+  FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
+fi
+MACHINE_COUNT=$(echo "$MACHINES" | wc -w)
+EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
 
 doit rm -rf $EXPORT_DEVS
 doit mkdir -p $EXPORT_DEVS/internal
