@@ -54,6 +54,18 @@ function doit {
   fi
 }
 
+if [ -e /dev/$VGROUP/updates ]; then
+  if [ $MERGE != yes -a $DELETE != yes ]; then
+    echo "you must either merge or delete updates" >&2
+    exit 1
+  fi
+else
+  if [ $MERGE == yes ]; then
+    echo "no updates to merge" >&2
+    exit 1
+  fi
+fi
+
 if [ $ONLYONE == yes ]; then
   MACHINES=$UPDATES_MACHINE
 fi
@@ -112,9 +124,6 @@ for MACHINE in $MACHINES; do
       if [ -e $EXPORT_DEVS/internal/cached-$MACHINE ]; then
         doit dmsetup remove $EXPORT_DEVS/internal/cached-$MACHINE
       fi
-      if [ -e /dev/$VGROUP/$MACHINE ]; then
-        doit lvremove -f /dev/$VGROUP/$MACHINE
-      fi
       if [ -e /dev/$VGROUP/$MACHINE-cow ]; then
         doit lvremove -f /dev/$VGROUP/$MACHINE-cow
       fi
@@ -127,16 +136,25 @@ for MACHINE in $MACHINES; do
     doit dmsetup create cached-$MACHINE --table "0 $MASTER_SIZE snapshot $CACHE_LOOP_DEVICE /dev/$VGROUP/$MACHINE-cow N 128"
 
     doit ln -s $EXPORT_DEVS/internal/cached-$MACHINE $EXPORT_DEVS/$MACHINE
-  else
-    # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
-    # later.
-    doit lvcreate -c 64k -n $MACHINE -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
-    doit ln -s /dev/$VGROUP/$MACHINE $EXPORT_DEVS/$MACHINE
   fi
 done
 
 if [ $MERGE == yes ]; then
-  doit lvconvert --merge /dev/$VGROUP/$UPDATES_MACHINE
+  doit lvconvert --merge /dev/$VGROUP/updates
+fi
+
+if [ $DELETE == yes ]; then
+  # Also delete the updates image, if present.
+  if [ -e /dev/$VGROUP/updates ]; then
+    doit lvremove -f /dev/$VGROUP/updates
+  fi
+fi
+
+if [ $ONLYONE == yes ]; then
+  # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
+  # later.
+  doit lvcreate -c 64k -n $MACHINE -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
+  doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$MACHINE
 fi
 
 if [ $MERGE != yes -a $DELETE != yes ]; then
