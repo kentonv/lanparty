@@ -16,15 +16,11 @@ DRY_RUN=no
 DELETE=no
 MERGE=no
 ONLYONE=no
-ONLYTWO=no
 PAGECACHE=yes
 
 # TODO:
 # - Revamp CLI
 # - Allow dynamic specification of update machine
-# - Remove -win7 suffix
-# - Remove devstation and win10 stuff
-# - Remove onlytwo
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,14 +32,6 @@ while [ $# -gt 0 ]; do
       echo -n "WARNING:  Press any key to DELETE..."
       read
       ;;
-    -l )
-      BASE_IMAGE=devstation-ubuntu
-      echo "Configuring for Linux..."
-      ;;
-    --win10 )
-      BASE_IMAGE=gamestation-win10
-      echo "Configuring for Windows 10..."
-      ;;
     -m )
       MERGE=yes
       echo -n "WARNING:  Press any key to MERGE..."
@@ -51,9 +39,6 @@ while [ $# -gt 0 ]; do
       ;;
     -1 )
       ONLYONE=yes
-      ;;
-    -2 )
-      ONLYTWO=yes
       ;;
     -c )
       PAGECACHE=yes
@@ -76,9 +61,6 @@ function doit {
 if [ $ONLYONE == yes ]; then
   MACHINES=$UPDATES_MACHINE
   PAGECACHE=no
-elif [ $ONLYTWO == yes ]; then
-  MACHINES='crashman flashman'
-  PAGECACHE=no
 fi
 
 if [ $MERGE == yes -o $DELETE == yes ]; then
@@ -97,9 +79,6 @@ if [ $MERGE == yes -o $DELETE == yes ]; then
 #  doit sleep 2
   if (mount | grep -q $LOCAL_MOUNT_POINT); then
     doit umount $LOCAL_MOUNT_POINT
-  fi
-  if (mount | grep -q /mnt/devstation); then
-    doit umount /mnt/devstation
   fi
 else
   # Bringing up.
@@ -138,8 +117,8 @@ for MACHINE in $MACHINES; do
       if [ -e $EXPORT_DEVS/internal/cached-$MACHINE ]; then
         doit dmsetup remove $EXPORT_DEVS/internal/cached-$MACHINE
       fi
-      if [ -e /dev/$VGROUP/$MACHINE-win7 ]; then
-        doit lvremove -f /dev/$VGROUP/$MACHINE-win7
+      if [ -e /dev/$VGROUP/$MACHINE ]; then
+        doit lvremove -f /dev/$VGROUP/$MACHINE
       fi
       if [ -e /dev/$VGROUP/$MACHINE-cow ]; then
         doit lvremove -f /dev/$VGROUP/$MACHINE-cow
@@ -154,23 +133,19 @@ for MACHINE in $MACHINES; do
 
     doit ln -s $EXPORT_DEVS/internal/cached-$MACHINE $EXPORT_DEVS/$MACHINE
   else
-    doit lvcreate -c 64k -n $MACHINE-win7 -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
-    doit ln -s /dev/$VGROUP/$MACHINE-win7 $EXPORT_DEVS/$MACHINE
+    doit lvcreate -c 64k -n $MACHINE -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
+    doit ln -s /dev/$VGROUP/$MACHINE $EXPORT_DEVS/$MACHINE
   fi
 done
 
 if [ $MERGE == yes ]; then
-  doit lvconvert --merge /dev/$VGROUP/$UPDATES_MACHINE-win7
+  doit lvconvert --merge /dev/$VGROUP/$UPDATES_MACHINE
 fi
 
 if [ $MERGE != yes -a $DELETE != yes ]; then
   echo "================ start iscsi ================"
 
 #  doit mount -o ro,offset=1048576 /dev/$VGROUP/$BASE_IMAGE $LOCAL_MOUNT_POINT/
-#  TODO: What's the right offset? Is there a partition table?
-#  doit mount -o ro,offset=1048576 /dev/$VGROUP/devstation-win7 /mnt/devstation/
-#  doit service iscsitarget start
-#  doit systemctl start tgt
 
   doit tgtd
 
@@ -182,7 +157,7 @@ if [ $MERGE != yes -a $DELETE != yes ]; then
 
   TID=1
   for MACHINE in $MACHINES; do
-    doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T iqn.2001-04.com.kentonshouse.protoman:$MACHINE-win7
+    doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T iqn.2001-04.com.kentonshouse.protoman:$MACHINE
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b $EXPORT_DEVS/$MACHINE
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
     TID=$(( TID + 1 ))
