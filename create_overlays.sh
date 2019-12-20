@@ -16,7 +16,6 @@ DRY_RUN=no
 DELETE=no
 MERGE=no
 ONLYONE=no
-PAGECACHE=yes
 
 # TODO:
 # - Revamp CLI
@@ -40,9 +39,6 @@ while [ $# -gt 0 ]; do
     -1 )
       ONLYONE=yes
       ;;
-    -c )
-      PAGECACHE=yes
-      ;;
     * )
       echo "unknown option: $1" >&2
       exit 1
@@ -60,7 +56,6 @@ function doit {
 
 if [ $ONLYONE == yes ]; then
   MACHINES=$UPDATES_MACHINE
-  PAGECACHE=no
 fi
 
 if [ $MERGE == yes -o $DELETE == yes ]; then
@@ -88,7 +83,7 @@ else
     doit losetup -d $CACHE_LOOP_DEVICE
   fi
 
-  if [ $PAGECACHE == yes ]; then
+  if [ $ONLYONE != yes ]; then
     # Setup loopback device on top of master image in order to get caching.
     doit losetup-new --direct-io=off --read-only $CACHE_LOOP_DEVICE /dev/$VGROUP/$BASE_IMAGE
   fi
@@ -124,7 +119,7 @@ for MACHINE in $MACHINES; do
         doit lvremove -f /dev/$VGROUP/$MACHINE-cow
       fi
     fi
-  elif [ $PAGECACHE == yes ]; then
+  elif [ $ONLYONE != yes ]; then
     # Create a regular volume with LVM.
     doit lvcreate -n $MACHINE-cow -l $EXTENTS $VGROUP $OVERLAY_DEVICE
 
@@ -133,6 +128,8 @@ for MACHINE in $MACHINES; do
 
     doit ln -s $EXPORT_DEVS/internal/cached-$MACHINE $EXPORT_DEVS/$MACHINE
   else
+    # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
+    # later.
     doit lvcreate -c 64k -n $MACHINE -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
     doit ln -s /dev/$VGROUP/$MACHINE $EXPORT_DEVS/$MACHINE
   fi
