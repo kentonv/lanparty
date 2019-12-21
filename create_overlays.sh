@@ -10,6 +10,7 @@ OVERLAY_DEVICE=/dev/sdb
 CACHE_LOOP_DEVICE=/dev/loop7
 # Use /dev/loop7 to avoid interfering with any loop devices LVM may have auto-created.
 LOCAL_MOUNT_POINT=/mnt/gamestation
+LOCAL_MOUNT_OPTIONS=offset=1048576
 
 # TODO:
 # - Revamp CLI
@@ -198,9 +199,6 @@ if [ $COMMAND == merge -o $COMMAND == destroy ]; then
   fi
 
   doit sleep 2
-  if (mount | grep -q $LOCAL_MOUNT_POINT); then
-    doit umount $LOCAL_MOUNT_POINT
-  fi
 else
   # Bringing up.
 
@@ -257,6 +255,13 @@ fi
 
 if [ $COMMAND == merge ]; then
   bold "================ merge overlay ================"
+
+  if [ "$LOCAL_MOUNT_POINT" != "" ]; then
+    if findmnt "$LOCAL_MOUNT_POINT" > /dev/null; then
+      doit umount "$LOCAL_MOUNT_POINT"
+    fi
+  fi
+
   doit lvconvert --merge /dev/$VGROUP/updates
 fi
 
@@ -278,8 +283,6 @@ fi
 if [ $COMMAND == init -o $COMMAND == start-updates ]; then
   bold "================ start iscsi ================"
 
-#  doit mount -o ro,offset=1048576 /dev/$VGROUP/$BASE_IMAGE $LOCAL_MOUNT_POINT/
-
   doit tgtd
 
   doit tgtadm --op update --mode sys --name State -v offline
@@ -297,5 +300,11 @@ if [ $COMMAND == init -o $COMMAND == start-updates ]; then
   done
 
   doit tgtadm --op update --mode sys --name State -v ready
+fi
 
+if [ "$LOCAL_MOUNT_POINT" != "" ]; then
+  bold "================ enable local mount ================"
+  if ! findmnt "$LOCAL_MOUNT_POINT" > /dev/null; then
+    doit mount -o "ro,$LOCAL_MOUNT_OPTIONS" /dev/$VGROUP/$BASE_IMAGE "$LOCAL_MOUNT_POINT"
+  fi
 fi
