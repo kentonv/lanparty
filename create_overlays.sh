@@ -224,15 +224,15 @@ MACHINE_COUNT=$(echo "$MACHINES" | wc -w)
 EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
 
 doit rm -rf $EXPORT_DEVS
-doit mkdir -p $EXPORT_DEVS/internal
+doit mkdir -p $EXPORT_DEVS
 
 if [ $COMMAND == init -o $COMMAND == destroy ]; then
   echo "================ delete overlays ================"
   # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
   # will replace them with fresh versions.)
   for MACHINE in $MACHINES; do
-    if [ -e $EXPORT_DEVS/internal/cached-$MACHINE ]; then
-      doit dmsetup remove $EXPORT_DEVS/internal/cached-$MACHINE
+    if [ -e /dev/mapper/cached-$MACHINE ]; then
+      doit dmsetup remove /dev/mapper/cached-$MACHINE
     fi
     if [ -e /dev/$VGROUP/$MACHINE-cow ]; then
       doit lvremove -f /dev/$VGROUP/$MACHINE-cow
@@ -249,7 +249,7 @@ if [ $COMMAND == init ]; then
     # Use it as a raw devicemapper COW device.
     doit dmsetup create cached-$MACHINE --table "0 $MASTER_SIZE snapshot $CACHE_LOOP_DEVICE /dev/$VGROUP/$MACHINE-cow N 128"
 
-    doit ln -s $EXPORT_DEVS/internal/cached-$MACHINE $EXPORT_DEVS/$MACHINE
+    doit ln -s /dev/mapper/cached-$MACHINE $EXPORT_DEVS/$MACHINE
   done
 fi
 
