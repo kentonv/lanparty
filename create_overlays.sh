@@ -197,11 +197,7 @@ if [ $COMMAND == merge -o $COMMAND == destroy ]; then
     doit tgtadm --op delete --mode system
   fi
 
-#  doit systemctl stop tgt
-#  doit service iscsitarget stop
   doit sleep 2
-#  doit service iscsitarget stop
-#  doit sleep 2
   if (mount | grep -q $LOCAL_MOUNT_POINT); then
     doit umount $LOCAL_MOUNT_POINT
   fi
