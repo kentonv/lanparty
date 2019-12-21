@@ -219,19 +219,6 @@ else
   fi
 fi
 
-MASTER_SIZE=$(blockdev --getsz /dev/$VGROUP/$BASE_IMAGE)
-
-if [ "$OVERLAY_DEVICE" != "" ]; then
-  FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
-else
-  FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
-fi
-MACHINE_COUNT=$(echo "$MACHINES" | wc -w)
-EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
-
-doit rm -rf $EXPORT_DEVS
-doit mkdir -p $EXPORT_DEVS
-
 if [ $COMMAND == init -o $COMMAND == destroy ]; then
   bold "================ delete overlays ================"
   # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
@@ -245,6 +232,19 @@ if [ $COMMAND == init -o $COMMAND == destroy ]; then
     fi
   done
 fi
+
+MASTER_SIZE=$(blockdev --getsz /dev/$VGROUP/$BASE_IMAGE)
+
+if [ "$OVERLAY_DEVICE" != "" ]; then
+  FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
+else
+  FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
+fi
+MACHINE_COUNT=$(echo "$MACHINES" | wc -w)
+EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
+
+doit rm -rf $EXPORT_DEVS
+doit mkdir -p $EXPORT_DEVS
 
 if [ $COMMAND == init ]; then
   bold "================ create overlays ================"
