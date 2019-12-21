@@ -9,43 +9,170 @@ EXPORT_DEVS=/dev/gamestations
 OVERLAY_DEVICE=/dev/sdb
 CACHE_LOOP_DEVICE=/dev/loop7
 # Use /dev/loop7 to avoid interfering with any loop devices LVM may have auto-created.
-UPDATES_MACHINE=flashman
 LOCAL_MOUNT_POINT=/mnt/gamestation
-
-DRY_RUN=no
-DELETE=no
-MERGE=no
-ONLYONE=no
 
 # TODO:
 # - Revamp CLI
 # - Allow dynamic specification of update machine
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -n )
-      DRY_RUN=yes
-      ;;
-    -d )
-      DELETE=yes
-      echo -n "WARNING:  Press any key to DELETE..."
-      read
-      ;;
-    -m )
-      MERGE=yes
-      echo -n "WARNING:  Press any key to MERGE..."
-      read
-      ;;
-    -1 )
-      ONLYONE=yes
-      ;;
-    * )
-      echo "unknown option: $1" >&2
-      exit 1
-      ;;
-  esac
+COMMAND_NAME=$(basename $0)
+
+bold() {
+  echo -e '\033[1m'"$@"'\033[0m'
+}
+
+usage() {
+  bold 'Usage:'
+  echo "  $COMMAND_NAME [-n] COMMAND"
+  echo
+  echo 'If -n is specified, no actions will be taken; the script will only print out'
+  echo 'the commands it would normally execute.'
+  echo
+  echo 'COMMAND may be:'
+  bold '  init [HOSTS...]'
+  echo '    Initialize the given hosts (default: all hosts), splitting all unallocated'
+  echo '    disk space in the volume group evenly among their copy-on-write overlays.'
+  echo '    If any specified hosts are already initialized, they are destroyed first.'
+  echo
+  bold '  destroy [HOSTS...]'
+  echo '    Wipe all machines and discard any unmerged updates. If HOSTS is specified,'
+  echo '    only destroy those specific hosts.'
+  echo
+  bold '  boot [HOSTS...]'
+  echo '    Sends ethernet wake-on-LAN magic packet to the given hosts (default: all'
+  echo '    hosts), hopefully causing them to power up.'
+  echo
+  bold '  shutdown [HOSTS...]'
+  echo '    Shuts down the given hosts (default: all running hosts) by connecting to'
+  echo '    each via SSH and issuing the configured shutdown command.'
+  echo
+  bold '  start-updates HOST'
+  echo '    Initialize the given host for installing updates, using all unallocated'
+  echo '    disk space in the volume group for a copy-on-write overlay. Once the'
+  echo '    machine is updated and powered down, use "merge" to merge changes back'
+  echo '    into the master image, or "destroy" to discard all changes.'
+  echo
+  bold '  merge'
+  echo '    Merges updates (started with start-updates) into the master image.'
+  echo
+  bold '  status'
+  echo '    Shows the current state of all machines'
+  echo
+  bold '  configure [dhcp|dns]'
+  echo '    Generates configuration snippets, written to standard output. The argument'
+  echo '    specifies what to configure:'
+  bold '      (no argument)'
+  echo '        Generates a template config file for this script itself. This should'
+  echo '        typically be saved to /etc/lanparty.conf and then edited to enter your'
+  echo '        specific configuration.'
+  bold '      dhcp'
+  echo '        Generates configuration for ISC DHCP server, derived from'
+  echo '        lanparty.conf. Typically you would add this to:'
+  echo '          /etc/dhcp/dhcp.conf'
+  bold '      dns'
+  echo '        Generates configuration for BIND 9 DNS server, derived from'
+  echo '        lanparty.conf. Typically you would add this to:'
+  echo '          /etc/bind/zones/YOUR-DOMAIN.db'
+}
+
+DRY_RUN=no
+if [ "${1:-}" == "-n" ]; then
+  DRY_RUN=yes
   shift
-done
+fi
+
+if [ $# -eq 0 ]; then
+  echo "ERROR: missing command" >&2
+  usage >&2
+  exit 1
+fi
+
+COMMAND=$1
+shift
+
+yesno() {
+  echo -n "$@ (y/n) " >&2
+
+  while read ANSWER; do
+    case $ANSWER in
+      y | Y | yes | Yes | YES )
+        return 0
+        ;;
+      n | N | no | No | NO )
+        return 1
+        ;;
+      * )
+        # try again
+        echo -n "$@ (y/n) " >&2
+        ;;
+    esac
+  done
+
+  # EOF?
+  echo "ERROR: Can't continue without user input."
+  exit 1
+}
+
+case "$COMMAND" in
+  init )
+    if [ -e "/dev/$VGROUP/updates" ]; then
+      echo "ERROR: You must either merge or destroy updates first." >&2
+    fi
+    ;;
+  destroy )
+    if [ -e "/dev/$VGROUP/updates" ]; then
+      yesno "There are unmerged updates. Really destroy them?" || exit 1
+    fi
+    ;;
+  boot )
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+  shutdown )
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+  start-updates )
+    if [ "$#" -ne 1 ]; then
+      echo 'ERROR: "start-updates" takes exactly one argument.' >&2
+      usage >&2
+      exit 1
+    fi
+    ;;
+  merge )
+    if [ "$#" -gt 0 ]; then
+      echo 'ERROR: "merge" does not take an argument.' >&2
+      usage >&2
+      exit 1
+    fi
+    if [ ! -e "/dev/$VGROUP/updates" ]; then
+      echo 'ERROR: No updates to merge.' >&2
+      exit 1
+    fi
+    ;;
+  status )
+    if [ "$#" -gt 0 ]; then
+      echo 'ERROR: "status" does not take an argument.' >&2
+      usage >&2
+      exit 1
+    fi
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+  configure )
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+  * )
+    echo "ERROR: unknown option: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
+
+if [ "$#" -gt 0 ]; then
+  MACHINES="$*"
+fi
 
 function doit {
   echo "$@"
@@ -54,24 +181,9 @@ function doit {
   fi
 }
 
-if [ -e /dev/$VGROUP/updates ]; then
-  if [ $MERGE != yes -a $DELETE != yes ]; then
-    echo "you must either merge or delete updates" >&2
-    exit 1
-  fi
-else
-  if [ $MERGE == yes ]; then
-    echo "no updates to merge" >&2
-    exit 1
-  fi
-fi
-
-if [ $ONLYONE == yes ]; then
-  MACHINES=$UPDATES_MACHINE
-fi
-
-if [ $MERGE == yes -o $DELETE == yes ]; then
+if [ $COMMAND == merge -o $COMMAND == destroy ]; then
   # Shutting down.
+  # TODO: Only disable specific machines.
   if pidof tgtd; then
     doit tgtadm --op update --mode sys --name State -v offline
     doit tgt-admin --offline ALL
@@ -95,7 +207,7 @@ else
     doit losetup -d $CACHE_LOOP_DEVICE
   fi
 
-  if [ $ONLYONE != yes ]; then
+  if [ $COMMAND != start-updates ]; then
     # Setup loopback device on top of master image in order to get caching.
     doit losetup-new --direct-io=off --read-only $CACHE_LOOP_DEVICE /dev/$VGROUP/$BASE_IMAGE
   fi
@@ -114,21 +226,23 @@ EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
 doit rm -rf $EXPORT_DEVS
 doit mkdir -p $EXPORT_DEVS/internal
 
-for MACHINE in $MACHINES; do
-  echo "================ $MACHINE ================"
-
-  if [ $MERGE == yes -o $DELETE == yes ]; then
-    # When deleting, delete everything.
-    # When merging, delete everything except $UPDATES_MACHINE.
-    if [ $DELETE == yes -o $MACHINE != $UPDATES_MACHINE ]; then
-      if [ -e $EXPORT_DEVS/internal/cached-$MACHINE ]; then
-        doit dmsetup remove $EXPORT_DEVS/internal/cached-$MACHINE
-      fi
-      if [ -e /dev/$VGROUP/$MACHINE-cow ]; then
-        doit lvremove -f /dev/$VGROUP/$MACHINE-cow
-      fi
+if [ $COMMAND == init -o $COMMAND == destroy ]; then
+  echo "================ delete overlays ================"
+  # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
+  # will replace them with fresh versions.)
+  for MACHINE in $MACHINES; do
+    if [ -e $EXPORT_DEVS/internal/cached-$MACHINE ]; then
+      doit dmsetup remove $EXPORT_DEVS/internal/cached-$MACHINE
     fi
-  elif [ $ONLYONE != yes ]; then
+    if [ -e /dev/$VGROUP/$MACHINE-cow ]; then
+      doit lvremove -f /dev/$VGROUP/$MACHINE-cow
+    fi
+  done
+fi
+
+if [ $COMMAND == init ]; then
+  echo "================ create overlays ================"
+  for MACHINE in $MACHINES; do
     # Create a regular volume with LVM.
     doit lvcreate -n $MACHINE-cow -l $EXTENTS $VGROUP $OVERLAY_DEVICE
 
@@ -136,28 +250,30 @@ for MACHINE in $MACHINES; do
     doit dmsetup create cached-$MACHINE --table "0 $MASTER_SIZE snapshot $CACHE_LOOP_DEVICE /dev/$VGROUP/$MACHINE-cow N 128"
 
     doit ln -s $EXPORT_DEVS/internal/cached-$MACHINE $EXPORT_DEVS/$MACHINE
-  fi
-done
+  done
+fi
 
-if [ $MERGE == yes ]; then
+if [ $COMMAND == merge ]; then
+  echo "================ merge overlay ================"
   doit lvconvert --merge /dev/$VGROUP/updates
 fi
 
-if [ $DELETE == yes ]; then
+if [ $COMMAND == destroy ]; then
   # Also delete the updates image, if present.
   if [ -e /dev/$VGROUP/updates ]; then
     doit lvremove -f /dev/$VGROUP/updates
   fi
 fi
 
-if [ $ONLYONE == yes ]; then
+if [ $COMMAND == start-updates ]; then
+  echo "================ create overlay ================"
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
-  doit lvcreate -c 64k -n $MACHINE -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
-  doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$MACHINE
+  doit lvcreate -c 64k -n $MACHINES -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
+  doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$MACHINES
 fi
 
-if [ $MERGE != yes -a $DELETE != yes ]; then
+if [ $COMMAND == init -o $COMMAND == start-updates ]; then
   echo "================ start iscsi ================"
 
 #  doit mount -o ro,offset=1048576 /dev/$VGROUP/$BASE_IMAGE $LOCAL_MOUNT_POINT/
