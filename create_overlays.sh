@@ -269,7 +269,7 @@ if [ $COMMAND == start-updates ]; then
   echo "================ create overlay ================"
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
-  doit lvcreate -c 64k -n $MACHINES -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
+  doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
   doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$MACHINES
 fi
 
