@@ -116,14 +116,35 @@ yesno() {
   exit 1
 }
 
+is-updating() {
+  # Check if we're currently in update mode.
+  test -e "/dev/$VGROUP/updates"
+}
+
+is-local-mount-point-configured() {
+  # Check if we're configured to mount the master image read-only at a local mount point.
+  test "$LOCAL_MOUNT_POINT" != ""
+}
+
+is-master-mounted-locally() {
+  # Check if the master image is currently mounted locally at the configured local mount point.
+  findmnt "$LOCAL_MOUNT_POINT" > /dev/null
+}
+
+is-caching-enabled() {
+  # Check if the page caching layer is currently configured.
+  losetup "$CACHE_LOOP_DEVICE" > /dev/null 2>&1
+}
+
 case "$COMMAND" in
   init )
-    if [ -e "/dev/$VGROUP/updates" ]; then
+    if is-updating; then
       echo "ERROR: You must either merge or destroy updates first." >&2
+      exit 1
     fi
     ;;
   destroy )
-    if [ -e "/dev/$VGROUP/updates" ]; then
+    if is-updating; then
       yesno "There are unmerged updates. Really destroy them?" || exit 1
     fi
     ;;
@@ -141,6 +162,10 @@ case "$COMMAND" in
       usage >&2
       exit 1
     fi
+    if is-updating; then
+      echo "ERROR: Updates are already in progress." >&2
+      exit 1
+    fi
     ;;
   merge )
     if [ "$#" -gt 0 ]; then
@@ -148,7 +173,7 @@ case "$COMMAND" in
       usage >&2
       exit 1
     fi
-    if [ ! -e "/dev/$VGROUP/updates" ]; then
+    if ! is-updating; then
       echo 'ERROR: No updates to merge.' >&2
       exit 1
     fi
@@ -186,6 +211,30 @@ function doit {
   fi
 }
 
+function unmount-master-locally {
+  # If the master image is mounted locally, unmount it. This is invoked before making any change
+  # that can't be done while the local mount is up, such as merging updates or switching between
+  # cached and uncached modes.
+  if is-local-mount-point-configured; then
+    if is-master-mounted-locally; then
+      doit umount "$LOCAL_MOUNT_POINT"
+    fi
+  fi
+}
+
+function mount-master-locally {
+  # If we're configured to mount the master image locally (read-only), mount it.
+  if is-local-mount-point-configured; then
+    if is-caching-enabled; then
+      # Mount from the loop device, because apparently we can't directly mount the base image
+      # when a loop device is using it (and anyway sharing the cache is good).
+      doit mount -o "ro,$LOCAL_MOUNT_OPTIONS" "$CACHE_LOOP_DEVICE" "$LOCAL_MOUNT_POINT"
+    else
+      doit mount -o "ro,$LOCAL_MOUNT_OPTIONS" /dev/$VGROUP/$BASE_IMAGE "$LOCAL_MOUNT_POINT"
+    fi
+  fi
+}
+
 if [ $COMMAND == merge -o $COMMAND == destroy ]; then
   bold "================ stop iscsi ================"
 
@@ -199,18 +248,6 @@ if [ $COMMAND == merge -o $COMMAND == destroy ]; then
   fi
 
   doit sleep 2
-else
-  # Bringing up.
-
-  # Remove old loopback mapping if it exists.
-  if (losetup | grep -q "^$CACHE_LOOP_DEVICE"); then
-    doit losetup -d $CACHE_LOOP_DEVICE
-  fi
-
-  if [ $COMMAND != start-updates ]; then
-    # Setup loopback device on top of master image in order to get caching.
-    doit losetup-new --direct-io=off --read-only $CACHE_LOOP_DEVICE /dev/$VGROUP/$BASE_IMAGE
-  fi
 fi
 
 if [ $COMMAND == init -o $COMMAND == destroy ]; then
@@ -242,6 +279,17 @@ doit mkdir -p $EXPORT_DEVS
 
 if [ $COMMAND == init ]; then
   bold "================ create overlays ================"
+
+  # Create the loopback layer -- for page caching -- over the master image, if it doesn't exist
+  # already.
+  if ! is-caching-enabled; then
+    unmount-master-locally
+    doit losetup-new --direct-io=off --read-only $CACHE_LOOP_DEVICE /dev/$VGROUP/$BASE_IMAGE
+    mount-master-locally
+  elif is-local-mount-point-configured && ! is-master-mounted-locally; then
+    mount-master-locally
+  fi
+
   for MACHINE in $MACHINES; do
     # Create a regular volume with LVM.
     doit lvcreate -n $MACHINE-cow -l $EXTENTS $VGROUP $OVERLAY_DEVICE
@@ -256,13 +304,9 @@ fi
 if [ $COMMAND == merge ]; then
   bold "================ merge overlay ================"
 
-  if [ "$LOCAL_MOUNT_POINT" != "" ]; then
-    if findmnt "$LOCAL_MOUNT_POINT" > /dev/null; then
-      doit umount "$LOCAL_MOUNT_POINT"
-    fi
-  fi
-
+  unmount-master-locally
   doit lvconvert --merge /dev/$VGROUP/updates
+  mount-master-locally
 fi
 
 if [ $COMMAND == destroy ]; then
@@ -274,6 +318,14 @@ fi
 
 if [ $COMMAND == start-updates ]; then
   bold "================ create overlay ================"
+
+  # Remove the loopback layer, if it currently exists.
+  if is-caching-enabled; then
+    unmount-master-locally
+    doit losetup -d $CACHE_LOOP_DEVICE
+    mount-master-locally
+  fi
+
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
@@ -300,11 +352,4 @@ if [ $COMMAND == init -o $COMMAND == start-updates ]; then
   done
 
   doit tgtadm --op update --mode sys --name State -v ready
-fi
-
-if [ "$LOCAL_MOUNT_POINT" != "" ]; then
-  bold "================ enable local mount ================"
-  if ! findmnt "$LOCAL_MOUNT_POINT" > /dev/null; then
-    doit mount -o "ro,$LOCAL_MOUNT_OPTIONS" /dev/$VGROUP/$BASE_IMAGE "$LOCAL_MOUNT_POINT"
-  fi
 fi
