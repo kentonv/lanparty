@@ -18,7 +18,9 @@ LOCAL_MOUNT_POINT=/mnt/gamestation
 COMMAND_NAME=$(basename $0)
 
 bold() {
-  echo -e '\033[1m'"$@"'\033[0m'
+  echo -ne '\033[1m'
+  echo -n "$@"
+  echo -e '\033[0m'
 }
 
 usage() {
@@ -175,13 +177,17 @@ if [ "$#" -gt 0 ]; then
 fi
 
 function doit {
-  echo "$@"
   if [ $DRY_RUN == no ]; then
+    bold "$@"
     "$@"
+  else
+    echo "$@"
   fi
 }
 
 if [ $COMMAND == merge -o $COMMAND == destroy ]; then
+  bold "================ stop iscsi ================"
+
   # Shutting down.
   # TODO: Only disable specific machines.
   if pidof tgtd; then
@@ -227,7 +233,7 @@ doit rm -rf $EXPORT_DEVS
 doit mkdir -p $EXPORT_DEVS
 
 if [ $COMMAND == init -o $COMMAND == destroy ]; then
-  echo "================ delete overlays ================"
+  bold "================ delete overlays ================"
   # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
   # will replace them with fresh versions.)
   for MACHINE in $MACHINES; do
@@ -241,7 +247,7 @@ if [ $COMMAND == init -o $COMMAND == destroy ]; then
 fi
 
 if [ $COMMAND == init ]; then
-  echo "================ create overlays ================"
+  bold "================ create overlays ================"
   for MACHINE in $MACHINES; do
     # Create a regular volume with LVM.
     doit lvcreate -n $MACHINE-cow -l $EXTENTS $VGROUP $OVERLAY_DEVICE
@@ -254,7 +260,7 @@ if [ $COMMAND == init ]; then
 fi
 
 if [ $COMMAND == merge ]; then
-  echo "================ merge overlay ================"
+  bold "================ merge overlay ================"
   doit lvconvert --merge /dev/$VGROUP/updates
 fi
 
@@ -266,7 +272,7 @@ if [ $COMMAND == destroy ]; then
 fi
 
 if [ $COMMAND == start-updates ]; then
-  echo "================ create overlay ================"
+  bold "================ create overlay ================"
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
@@ -274,7 +280,7 @@ if [ $COMMAND == start-updates ]; then
 fi
 
 if [ $COMMAND == init -o $COMMAND == start-updates ]; then
-  echo "================ start iscsi ================"
+  bold "================ start iscsi ================"
 
 #  doit mount -o ro,offset=1048576 /dev/$VGROUP/$BASE_IMAGE $LOCAL_MOUNT_POINT/
 
