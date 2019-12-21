@@ -190,7 +190,7 @@ if [ $COMMAND == merge -o $COMMAND == destroy ]; then
 
   # Shutting down.
   # TODO: Only disable specific machines.
-  if pidof tgtd; then
+  if pidof tgtd > /dev/null; then
     doit tgtadm --op update --mode sys --name State -v offline
     doit tgt-admin --offline ALL
     doit tgt-admin --update ALL -c /dev/null -f
