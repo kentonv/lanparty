@@ -100,7 +100,7 @@ is-updating() {
 
 is-local-mount-point-configured() {
   # Check if we're configured to mount the master image read-only at a local mount point.
-  test "$LOCAL_MOUNT_POINT" != ""
+  test "${LOCAL_MOUNT_POINT:-}" != ""
 }
 
 is-master-mounted-locally() {
@@ -129,7 +129,7 @@ validate-hostnames() {
 compute-extents() {
   # Compute how many extents to assign to each machine, if there are $1 machines.
 
-  if [ "$OVERLAY_DEVICE" != "" ]; then
+  if [ "${OVERLAY_DEVICE:-}" != "" ]; then
     FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
   else
     FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
@@ -190,6 +190,9 @@ unmount-master-locally() {
 mount-master-locally() {
   # If we're configured to mount the master image locally (read-only), mount it.
   if is-local-mount-point-configured; then
+    if [ ! -e "$LOCAL_MOUNT_POINT" ]; then
+      doit mkdir -p "$LOCAL_MOUNT_POINT"
+    fi
     if is-caching-enabled; then
       # Mount from the loop device, because apparently we can't directly mount the base image
       # when a loop device is using it (and anyway sharing the cache is good).
@@ -266,7 +269,7 @@ create-overlays() {
 
   for MACHINE in "$@"; do
     # Create a regular volume with LVM.
-    doit lvcreate -n "$MACHINE-cow" -l $EXTENTS $VGROUP $OVERLAY_DEVICE
+    doit lvcreate -n "$MACHINE-cow" -l $EXTENTS $VGROUP ${OVERLAY_DEVICE:-}
 
     # Use it as a raw devicemapper COW device.
     doit dmsetup create cached-$MACHINE --table "0 $MASTER_SIZE snapshot $CACHE_LOOP_DEVICE /dev/$VGROUP/$MACHINE-cow N 128"
@@ -307,7 +310,7 @@ start-updates() {
 
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
-  doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
+  doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE ${OVERLAY_DEVICE:-}
   doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$UPDATE_MACHINE
 }
 
@@ -322,7 +325,7 @@ start-iscsi() {
 
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=0.0.0.0:3260
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
-    doit tgtadm --lld iscsi --op new --mode portal --param portal=$ISCSI_BIND_ADDR:3260
+    doit tgtadm --lld iscsi --op new --mode portal --param portal=$ISCSI_SERVER_ADDR:3260
 
     doit tgtadm --op update --mode sys --name State -v ready
   fi
@@ -339,7 +342,7 @@ boot-hosts() {
   bold "================ boot hosts ================"
 
   for MACHINE in "$@"; do
-    doit etherwake -i $NETWORK_INTERFACE ${HOST_TO_MACADDR[$MACHINE]}
+    doit etherwake -i $SERVER_NETWORK_INTERFACE ${HOST_TO_MACADDR[$MACHINE]}
   done
 }
 
@@ -400,6 +403,218 @@ show-status() {
 
 # ========================================================================================
 
+generate-config() {
+  cat << __EOF__
+#! /bin/bash
+# Configuration file for '$SCRIPT_NAME' tool.
+# Place this at: /etc/$SCRIPT_NAME.conf
+#
+# This file is intended to be sourced by a bash script.
+
+MACHINE_TABLE="
+cutman      3   00:00:00:00:00:00
+gutsman     4   00:00:00:00:00:00
+iceman      5   00:00:00:00:00:00
+bombman     6   00:00:00:00:00:00
+fireman     7   00:00:00:00:00:00
+elecman     8   00:00:00:00:00:00
+metalman    9   00:00:00:00:00:00
+airman     10   00:00:00:00:00:00
+bubbleman  11   00:00:00:00:00:00
+quickman   12   00:00:00:00:00:00
+crashman   13   00:00:00:00:00:00
+flashman   14   00:00:00:00:00:00"
+# Table of machines managed by this script. Each line contains three columns:
+# - The machine's hostname. The script will help you set up DNS for these!
+# - The machine's ID number. This will be used as the last octet of the
+#   machine's IP address, as well as other places where a numeric identifier
+#   is needed. These do not need to be sequential, but each machine must have
+#   a unique number in the range 1 to 254.
+# - The machine's MAC address, needed for DHCP configuration and wake-on-LAN.
+#
+# The example shows a 12-machine setup named after bosses from Mega Man. The
+# ID numbers are chosen to match the "serial numbers" assigned to each boss
+# in the game itself, allowing you to use megaman.fandom.com as a makeshift
+# DNS service...
+
+IP_PREFIX=10.0.0
+# The first three octets of each machine's IP address.
+#
+# The last octet is the machine's ID number from MACHINE_TABLE.
+
+DOMAIN=example.com
+# The domain name under which the above hostnames are to be found.
+
+ISCSI_TARGET_PREFIX=iqn.2019-12.com.example.my-hostname
+# This probably doesn't matter.
+#
+# Prefix for iSCSI volume names. Unfortuantely, the designers of iSCSI were
+# afflicted with global namespace envy. Systems architects with this condition
+# believe that the resources in their system really must have globally-unique
+# names, and decide to invent a new namespace to that end. Of course, there is
+# in fact absolutely nothing stopping two iSCSI servers from exporting volumes
+# with the same names, and no problem would actually be caused by doing so.
+# Clients do not magically look up these global names in some global registry;
+# they connect to a specific server by configured IP address and then ask
+# that server for the volume they want. So in fact the names are server-local,
+# but iSCSI demands that you add a bunch of noise to the name to make it
+# appear globally unique for no good reason.
+#
+# Anyway, this is the format they want. It starts with "iqn." to indicate that
+# this is an iSCSI Qualified Name. Since every single node name in the world
+# starts with "iqn.", this prefix is 100% redundant, but there you go. The next
+# part is the date on which you registered your domain name, followed by the
+# fully-qualified DNS hostname of the server in reverse order.
+#
+# The purpose of all this is just to make sure your name will never be the
+# same as anyone else's -- for no practical reason. Neither clients nor
+# servers will actually parse the contents of this string. It's just a
+# string. You can probably put whatever you want in it and it'll be fine.
+
+ISCSI_SERVER_ADDR=10.0.0.1
+# The address of the iSCSI server. This actually matters. Clients will be
+# configured to connect to this address. The server will be configured to
+# bind to this address (and only this address).
+#
+# Note that there is NO AUTHENTICATION on the iSCSI server. You should make
+# sure is exposed only on a private, trusted network.
+
+SERVER_NETWORK_INTERFACE=eth0
+# Network interface corresponding to the above server address.
+#
+# More specifically, this is the interface on which Wake-on-LAN packets
+# should be sent in order to boot the client machines.
+
+VGROUP=lanparty-disks
+# LVM volume group name which will contain both the base disk image and all
+# overlays.
+#
+# It is up to you to configure LVM. You must create this volume group
+# yourself, and add some physical disks to it. I recommend having at least
+# two disks in the volume: one to host the base image itself, and a separate
+# one to host the overlays. The overlay disk should be optimized for speed
+# while the base image disk is optimized for size. For example, you might use
+# a 4TB spinning rust disk for the base image and then a 512MB SSD for the
+# overlays. Note, though, that if the overlay disk is too small, you may run
+# into problems where a machine becomes inoperable when someone makes enough
+# local changes to the machine that it runs out of overlay space; in this
+# case you will have to shut down, detroy, and re-init the machine in
+# question, thus wiping any local changes that had been made.
+
+BASE_IMAGE=master
+# LVM volume name for the base image.
+#
+# It is up to you to create this volume using LVM. It must be created within
+# the volume group specified above. You will want to be careful to instruct
+# LVM to place the base image on the appropriate physical disk within the
+# volume group, otherwise it might decide to use the disk you had intended
+# for overlay space.
+#
+# You do not need to format this volume. We will initially export it as an
+# unformated volume, and you can then run the Windows 10 (or other OS)
+# installer directly on the client machine.
+
+OVERLAY_DEVICE=/dev/sdb
+# Physical disk on which per-machine copy-on-write overlays should be
+# allocated.
+#
+# This disk must be a member of the LVM volume group specified above. You can
+# also leave this setting blank if you'd rather let LVM choose a physical
+# volume from the group automatically; this might be useful if you have
+# multiple disks in the volume group that you want to use for overlays, but
+# in this case you should make sure that the base image's disk is completely
+# full so that it doesn't get used. (Placing an overlay on the same disk as
+# the base image could hurt performance.)
+
+EXPORT_DEVS=/dev/gamestations
+# Directory which will be populated with the block devices representing each
+# machine's disk.
+#
+# We'll actually populate this directory with symlinks to other devices under
+# /dev/\$VGROUP or /dev/mapper.
+#
+# TODO: Maybe remove this.
+
+CACHE_LOOP_DEVICE=/dev/loop7
+# Loopback device that can be used to create a page-caching layer on top of
+# the base image.
+#
+# This just has to reference a loop device that isn't being used for anything
+# else on the system. /dev/loop7 worked well for me.
+#
+# Normally a loop device is used to make a file on disk appear to be a disk
+# drive itself, which can then be mounted. But, the loop device we create
+# will actually point to the base image device itself as the "file". The
+# effect of this is to cause all block operations to be converted to
+# filesystem read operations, which are then applied to the block device
+# itself, and so are converted back into block operations. Why do this?
+# Because the filesystem layer adds caching. Without a loopback layer, the
+# base image won't be cached at all in the server's memory. In normal iSCSI
+# scenarios, that is fine, because the client will do its own caching. But,
+# in our scenario, there are potentially many clients reading the exact same
+# data. For example, at a LAN party, everyone might open the same game at
+# roughly the same time. We don't want to have to read the game all the way
+# from disk for every client; we want all clients after the first to get the
+# cached copy. Using a loopback device stacked on top of a block device node
+# accomplishes this.
+
+#LOCAL_MOUNT_POINT=/mnt/gamestation
+# OPTIONAL: Mount the base image, read-only, to this directory on the server.
+# Leave commented out to skip mounting locally.
+#
+# This is useful, for example, to allow you to share the base image on the
+# network using Samba. If a guest brings their own laptop to the LAN party, and
+# they don't already have the necessary games installed, they will be able to
+# copy the game data from the Steam app cache via this network share, avoiding
+# a lengthy download. (They will still need to purchase the game on Steam in
+# order to play it, of course.)
+#
+# NOTE: Mounting will, of course, fail if the disk is not yet formatted. You
+# may therefore want to leave this unconfigured until after you've installed
+# your operating system.
+#
+# NOTE: The device will need to be unmounted briefly when switching between
+# update mode and party mode, as well as when merging updates. This unmount
+# will fail if the device is in use, which will prevent the script from
+# proceeding.
+
+LOCAL_MOUNT_OPTIONS=offset=1048576
+# Extra mount options to use when mounting the base image.
+#
+# Typically, the base image includes a partition table, and it's actually the
+# first partition that you want to mount. In my experience this partition is
+# offset 1 MiB from the start of the disk image, hence the default shown above.
+# However, if this is wrong, you can determine the correct value using fdisk.
+# For example, if you do:
+#
+#   fdisk -l /dev/lanparty-disks/master
+#
+# You should see a table like:
+#
+#   Device       Boot Start        End    Sectors  Size Id Type
+#   /dev/example *     2048 2582638591 2582636544  1.2T  7 HPFS/NTFS/exFAT
+#
+# Notice that "Start" shows sector 2048. Normally, each sector is 512 bytes
+# (though fdisk will also list the exact sector size earlier), so 2048 * 512
+# equals 1048576 (1 MiB).
+
+SHUTDOWN_COMMAND="shutdown /p /f"
+# SSH command to send to a client machine to shut it down.
+#
+# The default is appropriate for Windows. Yes, Windows has SSH now. Note that
+# you'll need to enable it in the control panel, and you'll need to configure
+# it with an appropriate public key so that your server can connect to it
+# without a password.
+
+SHUTDOWN_USERNAME="LAN Party Guest"
+# User name to use when issuing the shutdown command over SSH.
+#
+# Windows user names often contain spaces. That's fine.
+__EOF__
+}
+
+# ========================================================================================
+
 SCRIPT_NAME=$(basename $0)
 CONFIG_NAME=/etc/$SCRIPT_NAME.conf
 DRY_RUN=no
@@ -447,7 +662,7 @@ if [ -e "$CONFIG_NAME" ]; then
       HOST_TO_NUMBER[$HOSTNAME]=$NUMBER
       HOST_TO_MACADDR[$HOSTNAME]=$MACADDR
     fi
-  done <<< "$MACHINE_CONFIG"
+  done <<< "$MACHINE_TABLE"
 fi
 
 require-configured() {
@@ -572,11 +787,13 @@ case "$COMMAND" in
     ;;
 
   configure )
-    if [ "$#" -gt 0 ]; then
+    if [ "$#" -eq 0 ]; then
+      generate-config
+    else
       require-configured || exit 1
+      echo 'ERROR: not yet implemented' >&2
+      exit 1
     fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
     ;;
 
   help )
