@@ -16,6 +16,7 @@ quickman   12   00:00:00:00:00:00
 crashman   13   00:00:00:00:00:00
 flashman   14   00:00:00:00:00:00"
 
+DOMAIN=kentonshouse.com
 VGROUP=bigdisks
 BASE_IMAGE=gamestation-win7
 EXPORT_DEVS=/dev/gamestations
@@ -25,6 +26,8 @@ CACHE_LOOP_DEVICE=/dev/loop7
 LOCAL_MOUNT_POINT=/mnt/gamestation
 LOCAL_MOUNT_OPTIONS=offset=1048576
 NETWORK_INTERFACE=eno1
+SHUTDOWN_COMMAND="shutdown /p /f"
+SHUTDOWN_USERNAME="LAN Party Guest"
 
 # Parse machine configuration
 declare -a HOSTNAMES           # Array of hostnames, in order of declaration.
@@ -170,12 +173,40 @@ compute-extents() {
   echo "$(( FREE_EXTENTS / MACHINE_COUNT ))"
 }
 
-doit() {
+NEEDS_QUOTING_PATTERN='[$&|"\#!<>;()*?~`'"'"']'
+
+echo-command() {
+  # Echo a shell command to standard output, making sure to quote it appropriately so that it can
+  # be copied and pasted.
+
+  local -a EXPANSION
+  local -a OUTPUT
+  for ARG in "$@"; do
+    EXPANSION=( $ARG )
+    if [ "${EXPANSION[0]}" != "$ARG" ] ||
+       [[ "$ARG" =~ $NEEDS_QUOTING_PATTERN ]]; then
+      # Hack: Don't escape trailing &, we probably intended to print it like that.
+      if [ "$ARG" != "&" ]; then
+        ARG="'$(sed -e "s/'/'\"'\"'/g" <<< "$ARG")'"
+      fi
+    fi
+    OUTPUT+=( "$ARG" )
+  done
+
   if [ $DRY_RUN == no ]; then
-    bold "$@"
-    "$@"
+    # Make it bold.
+    echo -ne '\033[1m'
+    echo -n "${OUTPUT[*]}"
+    echo -e '\033[0m'
   else
-    echo "$@"
+    echo "${OUTPUT[*]}"
+  fi
+}
+
+doit() {
+  echo-command "$@"
+  if [ $DRY_RUN == no ]; then
+    "$@"
   fi
 }
 
@@ -346,6 +377,32 @@ boot-hosts() {
   done
 }
 
+shutdown-hosts() {
+  bold "================ shutdown hosts ================"
+
+  for MACHINE in "$@"; do
+    # We inline doit() here so that we can let the SSH commands run in the background with &.
+    # This is important because if a machine is already shut down, `ssh` will hang for a while
+    # before failing. We disable "StrictHostKeyChecking" because it won't work when ssh is running
+    # in the background.
+    #
+    # While we're at it, we take the opportunity to properly quote the arguments in the console
+    # output.
+    COMMAND=( ssh -o "StrictHostKeyChecking no" "$SHUTDOWN_USERNAME@$MACHINE.kentonshouse.com" -- 'shutdown /p /f' )
+    echo-command "${COMMAND[@]}" "&"
+    if [ $DRY_RUN == no ]; then
+      "${COMMAND[@]}" &
+    fi
+  done
+
+  if [ $DRY_RUN == no ]; then
+    bold wait
+    wait
+  else
+    echo wait
+  fi
+}
+
 # ========================================================================================
 
 DRY_RUN=no
@@ -407,8 +464,8 @@ case "$COMMAND" in
       validate-hostnames "$@"
       HOSTNAMES=("$@")
     fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
+
+    shutdown-hosts "${HOSTNAMES[@]}"
     ;;
 
   start-updates )
