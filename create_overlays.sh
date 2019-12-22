@@ -142,17 +142,29 @@ case "$COMMAND" in
       echo "ERROR: You must either merge or destroy updates first." >&2
       exit 1
     fi
+    if [ "$#" -gt 0 ]; then
+      MACHINES="$*"
+    fi
     ;;
   destroy )
     if is-updating; then
       yesno "There are unmerged updates. Really destroy them?" || exit 1
     fi
+    if [ "$#" -gt 0 ]; then
+      MACHINES="$*"
+    fi
     ;;
   boot )
+    if [ "$#" -gt 0 ]; then
+      MACHINES="$*"
+    fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
   shutdown )
+    if [ "$#" -gt 0 ]; then
+      MACHINES="$*"
+    fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
@@ -166,6 +178,7 @@ case "$COMMAND" in
       echo "ERROR: Updates are already in progress." >&2
       exit 1
     fi
+    UPDATE_MACHINE="$1"
     ;;
   merge )
     if [ "$#" -gt 0 ]; then
@@ -197,10 +210,6 @@ case "$COMMAND" in
     exit 1
     ;;
 esac
-
-if [ "$#" -gt 0 ]; then
-  MACHINES="$*"
-fi
 
 function doit {
   if [ $DRY_RUN == no ]; then
@@ -250,10 +259,11 @@ if [ $COMMAND == merge -o $COMMAND == destroy ]; then
   doit sleep 2
 fi
 
-if [ $COMMAND == init -o $COMMAND == destroy ]; then
+if [ $COMMAND == init -o $COMMAND == destroy -o $COMMAND == start-updates ]; then
   bold "================ delete overlays ================"
   # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
-  # will replace them with fresh versions.)
+  # will replace them with fresh versions, and for "start-updates" we always destroy all machines
+  # first.)
   for MACHINE in $MACHINES; do
     if [ -e /dev/mapper/cached-$MACHINE ]; then
       doit dmsetup remove /dev/mapper/cached-$MACHINE
@@ -329,7 +339,11 @@ if [ $COMMAND == start-updates ]; then
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
-  doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$MACHINES
+  doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$UPDATE_MACHINE
+
+  # HACK: Set MACHINES so that the update machine will have iSCSI enabled.
+  # TODO: Make this cleaner.
+  MACHINES=$UPDATE_MACHINE
 fi
 
 if [ $COMMAND == init -o $COMMAND == start-updates ]; then
