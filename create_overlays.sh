@@ -17,6 +17,8 @@ crashman   13   00:00:00:00:00:00
 flashman   14   00:00:00:00:00:00"
 
 DOMAIN=kentonshouse.com
+ISCSI_TARGET_PREFIX=iqn.2001-04.com.kentonshouse.protoman
+ISCSI_BIND_ADDR=10.0.1.0
 VGROUP=bigdisks
 BASE_IMAGE=gamestation-win7
 EXPORT_DEVS=/dev/gamestations
@@ -356,14 +358,14 @@ start-iscsi() {
 
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=0.0.0.0:3260
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
-    doit tgtadm --lld iscsi --op new --mode portal --param portal=10.0.1.0:3260
+    doit tgtadm --lld iscsi --op new --mode portal --param portal=$ISCSI_BIND_ADDR:3260
 
     doit tgtadm --op update --mode sys --name State -v ready
   fi
 
   for MACHINE in "$@"; do
     TID=${HOST_TO_NUMBER[$MACHINE]}
-    doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T iqn.2001-04.com.kentonshouse.protoman:$MACHINE
+    doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T $ISCSI_TARGET_PREFIX:$MACHINE
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b $EXPORT_DEVS/$MACHINE
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
   done
@@ -388,7 +390,7 @@ shutdown-hosts() {
     #
     # While we're at it, we take the opportunity to properly quote the arguments in the console
     # output.
-    COMMAND=( ssh -o "StrictHostKeyChecking no" "$SHUTDOWN_USERNAME@$MACHINE.kentonshouse.com" -- 'shutdown /p /f' )
+    COMMAND=( ssh -o "StrictHostKeyChecking no" "$SHUTDOWN_USERNAME@$MACHINE.$DOMAIN" -- 'shutdown /p /f' )
     echo-command "${COMMAND[@]}" "&"
     if [ $DRY_RUN == no ]; then
       "${COMMAND[@]}" &
