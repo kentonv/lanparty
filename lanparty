@@ -2,49 +2,8 @@
 
 set -euo pipefail
 
-MACHINE_CONFIG="
-cutman      3   00:00:00:00:00:00
-gutsman     4   00:00:00:00:00:00
-iceman      5   00:00:00:00:00:00
-bombman     6   00:00:00:00:00:00
-fireman     7   00:00:00:00:00:00
-elecman     8   00:00:00:00:00:00
-metalman    9   00:00:00:00:00:00
-airman     10   00:00:00:00:00:00
-bubbleman  11   00:00:00:00:00:00
-quickman   12   00:00:00:00:00:00
-crashman   13   00:00:00:00:00:00
-flashman   14   00:00:00:00:00:00"
-
-DOMAIN=kentonshouse.com
-ISCSI_TARGET_PREFIX=iqn.2001-04.com.kentonshouse.protoman
-ISCSI_BIND_ADDR=10.0.1.0
-VGROUP=bigdisks
-BASE_IMAGE=gamestation-win7
-EXPORT_DEVS=/dev/gamestations
-OVERLAY_DEVICE=/dev/sdb
-CACHE_LOOP_DEVICE=/dev/loop7
-# Use /dev/loop7 to avoid interfering with any loop devices LVM may have auto-created.
-LOCAL_MOUNT_POINT=/mnt/gamestation
-LOCAL_MOUNT_OPTIONS=offset=1048576
-NETWORK_INTERFACE=eno1
-SHUTDOWN_COMMAND="shutdown /p /f"
-SHUTDOWN_USERNAME="LAN Party Guest"
-
-# Parse machine configuration
-declare -a HOSTNAMES           # Array of hostnames, in order of declaration.
-declare -A HOST_TO_NUMBER      # Maps hostnames to ID numbers.
-declare -A HOST_TO_MACADDR     # Maps hostnames to MAC addresses.
-
-while read HOSTNAME NUMBER MACADDR JUNK; do
-  if [ "$HOSTNAME" != "" ]; then
-    HOSTNAMES+=("$HOSTNAME")
-    HOST_TO_NUMBER[$HOSTNAME]=$NUMBER
-    HOST_TO_MACADDR[$HOSTNAME]=$MACADDR
-  fi
-done <<< "$MACHINE_CONFIG"
-
-COMMAND_NAME=$(basename $0)
+# ========================================================================================
+# Implementation functions
 
 bold() {
   if [ -t 1 ]; then
@@ -58,10 +17,11 @@ bold() {
 
 usage() {
   bold 'Usage:'
-  echo "  $COMMAND_NAME [-n] COMMAND"
+  echo "  $SCRIPT_NAME [-c CONFIG] [-n] COMMAND"
   echo
   echo 'If -n is specified, no actions will be taken; the script will only print out'
-  echo 'the commands it would normally execute.'
+  echo 'the commands it would normally execute. If -c is given, it specifies the'
+  echo "location of the config file. The default is: /etc/$SCRIPT_NAME.conf"
   echo
   echo 'COMMAND may be:'
   bold '  init [HOSTS...]'
@@ -98,15 +58,15 @@ usage() {
   echo '    specifies what to configure:'
   bold '      (no argument)'
   echo '        Generates a template config file for this script itself. This should'
-  echo '        typically be saved to /etc/lanparty.conf and then edited to enter your'
+  echo "        typically be saved to /etc/$SCRIPT_NAME.conf and then edited to enter your"
   echo '        specific configuration.'
   bold '      dhcp'
   echo '        Generates configuration for ISC DHCP server, derived from'
-  echo '        lanparty.conf. Typically you would add this to:'
+  echo "        $SCRIPT_NAME.conf. Typically you would add this to:"
   echo '          /etc/dhcp/dhcp.conf'
   bold '      dns'
   echo '        Generates configuration for BIND 9 DNS server, derived from'
-  echo '        lanparty.conf. Typically you would add this to:'
+  echo "        $SCRIPT_NAME.conf. Typically you would add this to:"
   echo '          /etc/bind/zones/YOUR-DOMAIN.db'
 }
 
@@ -440,11 +400,65 @@ show-status() {
 
 # ========================================================================================
 
+SCRIPT_NAME=$(basename $0)
+CONFIG_NAME=/etc/$SCRIPT_NAME.conf
 DRY_RUN=no
-if [ "${1:-}" == "-n" ]; then
-  DRY_RUN=yes
-  shift
+
+# Parse early flags.
+while [[ "${1:-}" =~ ^- ]]; do
+  case "$1" in
+    -c )
+      if [ "$#" -lt 2 ]; then
+        echo "ERROR: Missing filename after -c." >&2
+        exit 1
+      fi
+      CONFIG_NAME="$2"
+      shift 2
+      ;;
+    -n )
+      DRY_RUN=yes
+      shift
+      ;;
+    -h | --help )
+      usage
+      exit 0
+      ;;
+    * )
+      echo "ERROR: Unknown flag: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Load config file.
+HAS_CONFIG=no
+if [ -e "$CONFIG_NAME" ]; then
+  . "$CONFIG_NAME"
+  HAS_CONFIG=yes
+
+  # Parse machine configuration
+  declare -a HOSTNAMES           # Array of hostnames, in order of declaration.
+  declare -A HOST_TO_NUMBER      # Maps hostnames to ID numbers.
+  declare -A HOST_TO_MACADDR     # Maps hostnames to MAC addresses.
+
+  while read HOSTNAME NUMBER MACADDR JUNK; do
+    if [ "$HOSTNAME" != "" ]; then
+      HOSTNAMES+=("$HOSTNAME")
+      HOST_TO_NUMBER[$HOSTNAME]=$NUMBER
+      HOST_TO_MACADDR[$HOSTNAME]=$MACADDR
+    fi
+  done <<< "$MACHINE_CONFIG"
 fi
+
+require-configured() {
+  if [ "$HAS_CONFIG" != yes ]; then
+    echo "ERROR: Config file $CONFIG_NAME not found. To generate one, use:" >&2
+    echo "  $0 configure" >&2
+    echo "Or, for more info, use:" >&2
+    echo "  $0 help" >&2
+    return 1
+  fi
+}
 
 if [ $# -eq 0 ]; then
   echo "ERROR: missing command" >&2
@@ -457,6 +471,7 @@ shift
 
 case "$COMMAND" in
   init )
+    require-configured || exit 1
     if is-updating; then
       echo "ERROR: You must either merge or destroy updates first." >&2
       exit 1
@@ -473,6 +488,7 @@ case "$COMMAND" in
     ;;
 
   destroy )
+    require-configured || exit 1
     if is-updating; then
       yesno "There are unmerged updates. Really destroy them?" || exit 1
     fi
@@ -486,6 +502,7 @@ case "$COMMAND" in
     ;;
 
   boot )
+    require-configured || exit 1
     if [ "$#" -gt 0 ]; then
       validate-hostnames "$@"
       HOSTNAMES=("$@")
@@ -495,6 +512,7 @@ case "$COMMAND" in
     ;;
 
   shutdown )
+    require-configured || exit 1
     if [ "$#" -gt 0 ]; then
       validate-hostnames "$@"
       HOSTNAMES=("$@")
@@ -504,6 +522,7 @@ case "$COMMAND" in
     ;;
 
   start-updates )
+    require-configured || exit 1
     if [ "$#" -ne 1 ]; then
       echo 'ERROR: "start-updates" takes exactly one argument.' >&2
       usage >&2
@@ -526,6 +545,7 @@ case "$COMMAND" in
     ;;
 
   merge )
+    require-configured || exit 1
     if [ "$#" -gt 0 ]; then
       echo 'ERROR: "merge" does not take an argument.' >&2
       usage >&2
@@ -541,6 +561,7 @@ case "$COMMAND" in
     ;;
 
   status )
+    require-configured || exit 1
     if [ "$#" -gt 0 ]; then
       echo 'ERROR: "status" does not take an argument.' >&2
       usage >&2
@@ -551,8 +572,16 @@ case "$COMMAND" in
     ;;
 
   configure )
+    if [ "$#" -gt 0 ]; then
+      require-configured || exit 1
+    fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
+    ;;
+
+  help )
+    usage
+    exit 0
     ;;
 
   * )
