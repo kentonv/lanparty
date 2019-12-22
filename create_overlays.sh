@@ -285,16 +285,22 @@ function mount-master-locally {
 if [ $COMMAND == merge -o $COMMAND == destroy ]; then
   bold "================ stop iscsi ================"
 
-  # Shutting down.
-  # TODO: Only disable specific machines.
+  # If tgtd is running, remove the specific targets.
   if pidof tgtd > /dev/null; then
-    doit tgtadm --op update --mode sys --name State -v offline
-    doit tgt-admin --offline ALL
-    doit tgt-admin --update ALL -c /dev/null -f
-    doit tgtadm --op delete --mode system
-  fi
+    NEED_SLEEP=no
+    for MACHINE in "${HOSTNAMES[@]}"; do
+      TID=${HOST_TO_NUMBER[$MACHINE]}
+      if tgtadm -C 0 --lld iscsi --op show --mode target --tid $TID > /dev/null 2>&1; then
+        doit tgtadm -C 0 --lld iscsi --op delete --force --mode target --tid $TID
+        NEED_SLEEP=yes
+      fi
+    done
 
-  doit sleep 2
+    if [ $NEED_SLEEP == yes ]; then
+      # Give tgtd time to close resources.
+      sleep 1
+    fi
+  fi
 fi
 
 if [ $COMMAND == init -o $COMMAND == destroy -o $COMMAND == start-updates ]; then
@@ -303,6 +309,9 @@ if [ $COMMAND == init -o $COMMAND == destroy -o $COMMAND == start-updates ]; the
   # will replace them with fresh versions, and for "start-updates" we always destroy all machines
   # first.)
   for MACHINE in "${HOSTNAMES[@]}"; do
+    if [ -e $EXPORT_DEVS/$MACHINE ]; then
+      doit rm $EXPORT_DEVS/$MACHINE
+    fi
     if [ -e /dev/mapper/cached-$MACHINE ]; then
       doit dmsetup remove /dev/mapper/cached-$MACHINE
     fi
@@ -322,9 +331,6 @@ fi
 MACHINE_COUNT=${#HOSTNAMES[*]}
 EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
 
-doit rm -rf $EXPORT_DEVS
-doit mkdir -p $EXPORT_DEVS
-
 if [ $COMMAND == init ]; then
   bold "================ create overlays ================"
 
@@ -336,6 +342,10 @@ if [ $COMMAND == init ]; then
     mount-master-locally
   elif is-local-mount-point-configured && ! is-master-mounted-locally; then
     mount-master-locally
+  fi
+
+  if [ ! -e $EXPORT_DEVS ]; then
+    doit mkdir -p $EXPORT_DEVS
   fi
 
   for MACHINE in "${HOSTNAMES[@]}"; do
@@ -374,6 +384,10 @@ if [ $COMMAND == start-updates ]; then
     mount-master-locally
   fi
 
+  if [ ! -e $EXPORT_DEVS ]; then
+    doit mkdir -p $EXPORT_DEVS
+  fi
+
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
@@ -387,13 +401,18 @@ fi
 if [ $COMMAND == init -o $COMMAND == start-updates ]; then
   bold "================ start iscsi ================"
 
-  doit tgtd
+  # Start tgtd if not running.
+  if ! pidof tgtd > /dev/null; then
+    doit tgtd
 
-  doit tgtadm --op update --mode sys --name State -v offline
+    doit tgtadm --op update --mode sys --name State -v offline
 
-  doit tgtadm --lld iscsi --op delete --mode portal --param portal=0.0.0.0:3260
-  doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
-  doit tgtadm --lld iscsi --op new --mode portal --param portal=10.0.1.0:3260
+    doit tgtadm --lld iscsi --op delete --mode portal --param portal=0.0.0.0:3260
+    doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
+    doit tgtadm --lld iscsi --op new --mode portal --param portal=10.0.1.0:3260
+
+    doit tgtadm --op update --mode sys --name State -v ready
+  fi
 
   for MACHINE in "${HOSTNAMES[@]}"; do
     TID=${HOST_TO_NUMBER[$MACHINE]}
@@ -401,6 +420,4 @@ if [ $COMMAND == init -o $COMMAND == start-updates ]; then
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b $EXPORT_DEVS/$MACHINE
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
   done
-
-  doit tgtadm --op update --mode sys --name State -v ready
 fi
