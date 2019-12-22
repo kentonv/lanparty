@@ -165,31 +165,47 @@ case "$COMMAND" in
       exit 1
     fi
     if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
       HOSTNAMES=("$@")
     fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    delete-overlays "${HOSTNAMES[@]}"
+    create-overlays "${HOSTNAMES[@]}"
+    start-iscsi "${HOSTNAMES[@]}"
     ;;
+
   destroy )
     if is-updating; then
       yesno "There are unmerged updates. Really destroy them?" || exit 1
     fi
     if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
       HOSTNAMES=("$@")
     fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    delete-overlays "${HOSTNAMES[@]}"
     ;;
+
   boot )
     if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
       HOSTNAMES=("$@")
     fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
+
   shutdown )
     if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
       HOSTNAMES=("$@")
     fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
+
   start-updates )
     if [ "$#" -ne 1 ]; then
       echo 'ERROR: "start-updates" takes exactly one argument.' >&2
@@ -205,7 +221,13 @@ case "$COMMAND" in
       echo "ERROR: No such host configured: $UPDATE_MACHINE" >&2
       exit 1
     fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    delete-overlays "${HOSTNAMES[@]}"
+    start-updates
+    start-iscsi "$UPDATE_MACHINE"
     ;;
+
   merge )
     if [ "$#" -gt 0 ]; then
       echo 'ERROR: "merge" does not take an argument.' >&2
@@ -216,7 +238,11 @@ case "$COMMAND" in
       echo 'ERROR: No updates to merge.' >&2
       exit 1
     fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    merge-updates
     ;;
+
   status )
     if [ "$#" -gt 0 ]; then
       echo 'ERROR: "status" does not take an argument.' >&2
@@ -226,10 +252,12 @@ case "$COMMAND" in
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
+
   configure )
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
+
   * )
     echo "ERROR: Unknown command: $1" >&2
     usage >&2
@@ -237,19 +265,33 @@ case "$COMMAND" in
     ;;
 esac
 
-# Validate hostnames.
-for MACHINE in "${HOSTNAMES[@]}"; do
-  if [ "${HOST_TO_NUMBER[$MACHINE]:-none}" == "none" ]; then
-    echo "ERROR: No such host configured: $MACHINE" >&2
-    exit 1
-  fi
-  if [ "$MACHINE" == "updates" ]; then
-    echo "ERROR: You cannot name a machine 'updates'." >&2
-    exit 1
-  fi
-done
+validate-hostnames() {
+  for MACHINE in "$@"; do
+    if [ "${HOST_TO_NUMBER[$MACHINE]:-none}" == "none" ]; then
+      echo "ERROR: No such host configured: $MACHINE" >&2
+      exit 1
+    fi
+    if [ "$MACHINE" == "updates" ]; then
+      echo "ERROR: You cannot name a machine 'updates'." >&2
+      exit 1
+    fi
+  done
+}
 
-function doit {
+compute-extents() {
+  # Compute how many extents to assign to each machine, if there are $1 machines.
+
+  if [ "$OVERLAY_DEVICE" != "" ]; then
+    FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
+  else
+    FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
+  fi
+  MACHINE_COUNT=${1:-1}
+
+  echo "$(( FREE_EXTENTS / MACHINE_COUNT ))"
+}
+
+doit() {
   if [ $DRY_RUN == no ]; then
     bold "$@"
     "$@"
@@ -258,7 +300,7 @@ function doit {
   fi
 }
 
-function unmount-master-locally {
+unmount-master-locally() {
   # If the master image is mounted locally, unmount it. This is invoked before making any change
   # that can't be done while the local mount is up, such as merging updates or switching between
   # cached and uncached modes.
@@ -269,7 +311,7 @@ function unmount-master-locally {
   fi
 }
 
-function mount-master-locally {
+mount-master-locally() {
   # If we're configured to mount the master image locally (read-only), mount it.
   if is-local-mount-point-configured; then
     if is-caching-enabled; then
@@ -282,13 +324,13 @@ function mount-master-locally {
   fi
 }
 
-if [ $COMMAND == merge -o $COMMAND == destroy ]; then
+stop-iscsi() {
   bold "================ stop iscsi ================"
 
   # If tgtd is running, remove the specific targets.
   if pidof tgtd > /dev/null; then
     NEED_SLEEP=no
-    for MACHINE in "${HOSTNAMES[@]}"; do
+    for MACHINE in "$@"; do
       TID=${HOST_TO_NUMBER[$MACHINE]}
       if tgtadm -C 0 --lld iscsi --op show --mode target --tid $TID > /dev/null 2>&1; then
         doit tgtadm -C 0 --lld iscsi --op delete --force --mode target --tid $TID
@@ -298,17 +340,17 @@ if [ $COMMAND == merge -o $COMMAND == destroy ]; then
 
     if [ $NEED_SLEEP == yes ]; then
       # Give tgtd time to close resources.
-      sleep 1
+      doit sleep 1
     fi
   fi
-fi
+}
 
-if [ $COMMAND == init -o $COMMAND == destroy -o $COMMAND == start-updates ]; then
+delete-overlays() {
   bold "================ delete overlays ================"
   # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
   # will replace them with fresh versions, and for "start-updates" we always destroy all machines
   # first.)
-  for MACHINE in "${HOSTNAMES[@]}"; do
+  for MACHINE in "$@"; do
     if [ -e $EXPORT_DEVS/$MACHINE ]; then
       doit rm $EXPORT_DEVS/$MACHINE
     fi
@@ -319,20 +361,18 @@ if [ $COMMAND == init -o $COMMAND == destroy -o $COMMAND == start-updates ]; the
       doit lvremove -f /dev/$VGROUP/$MACHINE-cow
     fi
   done
-fi
 
-MASTER_SIZE=$(blockdev --getsz /dev/$VGROUP/$BASE_IMAGE)
+  # Also delete the updates image, if present.
+  if [ -e /dev/$VGROUP/updates ]; then
+    doit lvremove -f /dev/$VGROUP/updates
+  fi
+}
 
-if [ "$OVERLAY_DEVICE" != "" ]; then
-  FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
-else
-  FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
-fi
-MACHINE_COUNT=${#HOSTNAMES[*]}
-EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
-
-if [ $COMMAND == init ]; then
+create-overlays() {
   bold "================ create overlays ================"
+
+  MASTER_SIZE=$(blockdev --getsz /dev/$VGROUP/$BASE_IMAGE)
+  EXTENTS=$(compute-extents $#)
 
   # Create the loopback layer -- for page caching -- over the master image, if it doesn't exist
   # already.
@@ -348,7 +388,7 @@ if [ $COMMAND == init ]; then
     doit mkdir -p $EXPORT_DEVS
   fi
 
-  for MACHINE in "${HOSTNAMES[@]}"; do
+  for MACHINE in "$@"; do
     # Create a regular volume with LVM.
     doit lvcreate -n "$MACHINE-cow" -l $EXTENTS $VGROUP $OVERLAY_DEVICE
 
@@ -357,25 +397,26 @@ if [ $COMMAND == init ]; then
 
     doit ln -s /dev/mapper/cached-$MACHINE $EXPORT_DEVS/$MACHINE
   done
-fi
+}
 
-if [ $COMMAND == merge ]; then
+merge-updates() {
   bold "================ merge overlay ================"
+
+  for MACHINE in "$@"; do
+    if [ -e $EXPORT_DEVS/$MACHINE ]; then
+      doit rm $EXPORT_DEVS/$MACHINE
+    fi
+  done
 
   unmount-master-locally
   doit lvconvert --merge /dev/$VGROUP/updates
   mount-master-locally
-fi
+}
 
-if [ $COMMAND == destroy ]; then
-  # Also delete the updates image, if present.
-  if [ -e /dev/$VGROUP/updates ]; then
-    doit lvremove -f /dev/$VGROUP/updates
-  fi
-fi
-
-if [ $COMMAND == start-updates ]; then
+start-updates() {
   bold "================ create overlay ================"
+
+  EXTENTS=$(compute-extents 1)
 
   # Remove the loopback layer, if it currently exists.
   if is-caching-enabled; then
@@ -392,13 +433,9 @@ if [ $COMMAND == start-updates ]; then
   # later.
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
   doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$UPDATE_MACHINE
+}
 
-  # HACK: Set HOSTNAMES so that the update machine will have iSCSI enabled.
-  # TODO: Make this cleaner.
-  HOSTNAMES=( "$UPDATE_MACHINE" )
-fi
-
-if [ $COMMAND == init -o $COMMAND == start-updates ]; then
+start-iscsi() {
   bold "================ start iscsi ================"
 
   # Start tgtd if not running.
@@ -414,10 +451,10 @@ if [ $COMMAND == init -o $COMMAND == start-updates ]; then
     doit tgtadm --op update --mode sys --name State -v ready
   fi
 
-  for MACHINE in "${HOSTNAMES[@]}"; do
+  for MACHINE in "$@"; do
     TID=${HOST_TO_NUMBER[$MACHINE]}
     doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T iqn.2001-04.com.kentonshouse.protoman:$MACHINE
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b $EXPORT_DEVS/$MACHINE
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
   done
-fi
+}
