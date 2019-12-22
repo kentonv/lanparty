@@ -47,9 +47,13 @@ done <<< "$MACHINE_CONFIG"
 COMMAND_NAME=$(basename $0)
 
 bold() {
-  echo -ne '\033[1m'
-  echo -n "$@"
-  echo -e '\033[0m'
+  if [ -t 1 ]; then
+    echo -ne '\033[1m'
+    echo -n "$@"
+    echo -e '\033[0m'
+  else
+    echo "$@"
+  fi
 }
 
 usage() {
@@ -195,7 +199,7 @@ echo-command() {
     OUTPUT+=( "$ARG" )
   done
 
-  if [ $DRY_RUN == no ]; then
+  if [ $DRY_RUN == no -a -t 1 ]; then
     # Make it bold.
     echo -ne '\033[1m'
     echo -n "${OUTPUT[*]}"
