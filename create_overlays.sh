@@ -403,6 +403,35 @@ shutdown-hosts() {
   fi
 }
 
+show-status() {
+  if is-updating; then
+    for MACHINE in "$@"; do
+      if [ -e $EXPORT_DEVS/$MACHINE ]; then
+        PERCENT=$(lvdisplay "/dev/$VGROUP/updates" |
+                  grep "Allocated to snapshot" |
+                  sed -e 's/ *Allocated to snapshot *//')
+        echo "$MACHINE: ${PERCENT} (update mode)"
+      else
+        echo "$MACHINE: offline"
+      fi
+    done
+  else
+    for MACHINE in "$@"; do
+      if [ -e "/dev/mapper/cached-$MACHINE" ]; then
+        STATUS=$(dmsetup status "cached-$MACHINE" | cut -d' ' -f 4)
+        if [ "$STATUS" = Invalid ]; then
+          echo "$MACHINE: exhausted"
+        else
+          PERCENT=$(echo "scale=2; 100*$STATUS" | bc)
+          printf '%s: %0.2f%%\n' "$MACHINE" "$PERCENT"
+        fi
+      else
+        echo "$MACHINE: offline"
+      fi
+    done
+  fi
+}
+
 # ========================================================================================
 
 DRY_RUN=no
@@ -511,8 +540,8 @@ case "$COMMAND" in
       usage >&2
       exit 1
     fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
+
+    show-status "${HOSTNAMES[@]}"
     ;;
 
   configure )

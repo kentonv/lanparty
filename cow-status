@@ -1,2 +1,0 @@
-#! /bin/bash
-dmsetup status | grep "snapshot " | awk "{print \$5 \" \" \$1}" | (while read EXP NAME; do if [ "$EXP" = Invalid ]; then PERCENT="XX"; else PERCENT=$(echo "100*$EXP" | bc); fi; SHORT=$(echo $NAME | cut -d- -f 2); echo $PERCENT $SHORT; done)
