@@ -100,21 +100,6 @@ usage() {
   echo '          /etc/bind/zones/YOUR-DOMAIN.db'
 }
 
-DRY_RUN=no
-if [ "${1:-}" == "-n" ]; then
-  DRY_RUN=yes
-  shift
-fi
-
-if [ $# -eq 0 ]; then
-  echo "ERROR: missing command" >&2
-  usage >&2
-  exit 1
-fi
-
-COMMAND=$1
-shift
-
 yesno() {
   echo -n "$@ (y/n) " >&2
 
@@ -157,113 +142,6 @@ is-caching-enabled() {
   # Check if the page caching layer is currently configured.
   losetup "$CACHE_LOOP_DEVICE" > /dev/null 2>&1
 }
-
-case "$COMMAND" in
-  init )
-    if is-updating; then
-      echo "ERROR: You must either merge or destroy updates first." >&2
-      exit 1
-    fi
-    if [ "$#" -gt 0 ]; then
-      validate-hostnames "$@"
-      HOSTNAMES=("$@")
-    fi
-
-    stop-iscsi "${HOSTNAMES[@]}"
-    delete-overlays "${HOSTNAMES[@]}"
-    create-overlays "${HOSTNAMES[@]}"
-    start-iscsi "${HOSTNAMES[@]}"
-    ;;
-
-  destroy )
-    if is-updating; then
-      yesno "There are unmerged updates. Really destroy them?" || exit 1
-    fi
-    if [ "$#" -gt 0 ]; then
-      validate-hostnames "$@"
-      HOSTNAMES=("$@")
-    fi
-
-    stop-iscsi "${HOSTNAMES[@]}"
-    delete-overlays "${HOSTNAMES[@]}"
-    ;;
-
-  boot )
-    if [ "$#" -gt 0 ]; then
-      validate-hostnames "$@"
-      HOSTNAMES=("$@")
-    fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
-    ;;
-
-  shutdown )
-    if [ "$#" -gt 0 ]; then
-      validate-hostnames "$@"
-      HOSTNAMES=("$@")
-    fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
-    ;;
-
-  start-updates )
-    if [ "$#" -ne 1 ]; then
-      echo 'ERROR: "start-updates" takes exactly one argument.' >&2
-      usage >&2
-      exit 1
-    fi
-    if is-updating; then
-      echo "ERROR: Updates are already in progress." >&2
-      exit 1
-    fi
-    UPDATE_MACHINE="$1"
-    if [ "${HOST_TO_NUMBER[$UPDATE_MACHINE]:-none}" == "none" ]; then
-      echo "ERROR: No such host configured: $UPDATE_MACHINE" >&2
-      exit 1
-    fi
-
-    stop-iscsi "${HOSTNAMES[@]}"
-    delete-overlays "${HOSTNAMES[@]}"
-    start-updates
-    start-iscsi "$UPDATE_MACHINE"
-    ;;
-
-  merge )
-    if [ "$#" -gt 0 ]; then
-      echo 'ERROR: "merge" does not take an argument.' >&2
-      usage >&2
-      exit 1
-    fi
-    if ! is-updating; then
-      echo 'ERROR: No updates to merge.' >&2
-      exit 1
-    fi
-
-    stop-iscsi "${HOSTNAMES[@]}"
-    merge-updates
-    ;;
-
-  status )
-    if [ "$#" -gt 0 ]; then
-      echo 'ERROR: "status" does not take an argument.' >&2
-      usage >&2
-      exit 1
-    fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
-    ;;
-
-  configure )
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
-    ;;
-
-  * )
-    echo "ERROR: Unknown command: $1" >&2
-    usage >&2
-    exit 1
-    ;;
-esac
 
 validate-hostnames() {
   for MACHINE in "$@"; do
@@ -458,3 +336,127 @@ start-iscsi() {
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
   done
 }
+
+# ========================================================================================
+
+DRY_RUN=no
+if [ "${1:-}" == "-n" ]; then
+  DRY_RUN=yes
+  shift
+fi
+
+if [ $# -eq 0 ]; then
+  echo "ERROR: missing command" >&2
+  usage >&2
+  exit 1
+fi
+
+COMMAND=$1
+shift
+
+case "$COMMAND" in
+  init )
+    if is-updating; then
+      echo "ERROR: You must either merge or destroy updates first." >&2
+      exit 1
+    fi
+    if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
+      HOSTNAMES=("$@")
+    fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    delete-overlays "${HOSTNAMES[@]}"
+    create-overlays "${HOSTNAMES[@]}"
+    start-iscsi "${HOSTNAMES[@]}"
+    ;;
+
+  destroy )
+    if is-updating; then
+      yesno "There are unmerged updates. Really destroy them?" || exit 1
+    fi
+    if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
+      HOSTNAMES=("$@")
+    fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    delete-overlays "${HOSTNAMES[@]}"
+    ;;
+
+  boot )
+    if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
+      HOSTNAMES=("$@")
+    fi
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+
+  shutdown )
+    if [ "$#" -gt 0 ]; then
+      validate-hostnames "$@"
+      HOSTNAMES=("$@")
+    fi
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+
+  start-updates )
+    if [ "$#" -ne 1 ]; then
+      echo 'ERROR: "start-updates" takes exactly one argument.' >&2
+      usage >&2
+      exit 1
+    fi
+    if is-updating; then
+      echo "ERROR: Updates are already in progress." >&2
+      exit 1
+    fi
+    UPDATE_MACHINE="$1"
+    if [ "${HOST_TO_NUMBER[$UPDATE_MACHINE]:-none}" == "none" ]; then
+      echo "ERROR: No such host configured: $UPDATE_MACHINE" >&2
+      exit 1
+    fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    delete-overlays "${HOSTNAMES[@]}"
+    start-updates
+    start-iscsi "$UPDATE_MACHINE"
+    ;;
+
+  merge )
+    if [ "$#" -gt 0 ]; then
+      echo 'ERROR: "merge" does not take an argument.' >&2
+      usage >&2
+      exit 1
+    fi
+    if ! is-updating; then
+      echo 'ERROR: No updates to merge.' >&2
+      exit 1
+    fi
+
+    stop-iscsi "${HOSTNAMES[@]}"
+    merge-updates
+    ;;
+
+  status )
+    if [ "$#" -gt 0 ]; then
+      echo 'ERROR: "status" does not take an argument.' >&2
+      usage >&2
+      exit 1
+    fi
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+
+  configure )
+    echo 'ERROR: not yet implemented' >&2
+    exit 1
+    ;;
+
+  * )
+    echo "ERROR: Unknown command: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
