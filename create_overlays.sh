@@ -2,7 +2,20 @@
 
 set -euo pipefail
 
-MACHINES="cutman gutsman iceman bombman fireman elecman metalman airman bubbleman quickman crashman flashman"
+MACHINE_CONFIG="
+cutman      3   00:00:00:00:00:00
+gutsman     4   00:00:00:00:00:00
+iceman      5   00:00:00:00:00:00
+bombman     6   00:00:00:00:00:00
+fireman     7   00:00:00:00:00:00
+elecman     8   00:00:00:00:00:00
+metalman    9   00:00:00:00:00:00
+airman     10   00:00:00:00:00:00
+bubbleman  11   00:00:00:00:00:00
+quickman   12   00:00:00:00:00:00
+crashman   13   00:00:00:00:00:00
+flashman   14   00:00:00:00:00:00"
+
 VGROUP=bigdisks
 BASE_IMAGE=gamestation-win7
 EXPORT_DEVS=/dev/gamestations
@@ -12,9 +25,18 @@ CACHE_LOOP_DEVICE=/dev/loop7
 LOCAL_MOUNT_POINT=/mnt/gamestation
 LOCAL_MOUNT_OPTIONS=offset=1048576
 
-# TODO:
-# - Revamp CLI
-# - Allow dynamic specification of update machine
+# Parse machine configuration
+declare -a HOSTNAMES           # Array of hostnames, in order of declaration.
+declare -A HOST_TO_NUMBER      # Maps hostnames to ID numbers.
+declare -A HOST_TO_MACADDR     # Maps hostnames to MAC addresses.
+
+while read HOSTNAME NUMBER MACADDR JUNK; do
+  if [ "$HOSTNAME" != "" ]; then
+    HOSTNAMES+=("$HOSTNAME")
+    HOST_TO_NUMBER[$HOSTNAME]=$NUMBER
+    HOST_TO_MACADDR[$HOSTNAME]=$MACADDR
+  fi
+done <<< "$MACHINE_CONFIG"
 
 COMMAND_NAME=$(basename $0)
 
@@ -143,7 +165,7 @@ case "$COMMAND" in
       exit 1
     fi
     if [ "$#" -gt 0 ]; then
-      MACHINES="$*"
+      HOSTNAMES=("$@")
     fi
     ;;
   destroy )
@@ -151,19 +173,19 @@ case "$COMMAND" in
       yesno "There are unmerged updates. Really destroy them?" || exit 1
     fi
     if [ "$#" -gt 0 ]; then
-      MACHINES="$*"
+      HOSTNAMES=("$@")
     fi
     ;;
   boot )
     if [ "$#" -gt 0 ]; then
-      MACHINES="$*"
+      HOSTNAMES=("$@")
     fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
     ;;
   shutdown )
     if [ "$#" -gt 0 ]; then
-      MACHINES="$*"
+      HOSTNAMES=("$@")
     fi
     echo 'ERROR: not yet implemented' >&2
     exit 1
@@ -179,6 +201,10 @@ case "$COMMAND" in
       exit 1
     fi
     UPDATE_MACHINE="$1"
+    if [ "${HOST_TO_NUMBER[$UPDATE_MACHINE]:-none}" == "none" ]; then
+      echo "ERROR: No such host configured: $UPDATE_MACHINE" >&2
+      exit 1
+    fi
     ;;
   merge )
     if [ "$#" -gt 0 ]; then
@@ -205,11 +231,23 @@ case "$COMMAND" in
     exit 1
     ;;
   * )
-    echo "ERROR: unknown option: $1" >&2
+    echo "ERROR: Unknown command: $1" >&2
     usage >&2
     exit 1
     ;;
 esac
+
+# Validate hostnames.
+for MACHINE in "${HOSTNAMES[@]}"; do
+  if [ "${HOST_TO_NUMBER[$MACHINE]:-none}" == "none" ]; then
+    echo "ERROR: No such host configured: $MACHINE" >&2
+    exit 1
+  fi
+  if [ "$MACHINE" == "updates" ]; then
+    echo "ERROR: You cannot name a machine 'updates'." >&2
+    exit 1
+  fi
+done
 
 function doit {
   if [ $DRY_RUN == no ]; then
@@ -264,7 +302,7 @@ if [ $COMMAND == init -o $COMMAND == destroy -o $COMMAND == start-updates ]; the
   # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
   # will replace them with fresh versions, and for "start-updates" we always destroy all machines
   # first.)
-  for MACHINE in $MACHINES; do
+  for MACHINE in "${HOSTNAMES[@]}"; do
     if [ -e /dev/mapper/cached-$MACHINE ]; then
       doit dmsetup remove /dev/mapper/cached-$MACHINE
     fi
@@ -281,7 +319,7 @@ if [ "$OVERLAY_DEVICE" != "" ]; then
 else
   FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
 fi
-MACHINE_COUNT=$(echo "$MACHINES" | wc -w)
+MACHINE_COUNT=${#HOSTNAMES[*]}
 EXTENTS=$(( FREE_EXTENTS / MACHINE_COUNT ))
 
 doit rm -rf $EXPORT_DEVS
@@ -300,9 +338,9 @@ if [ $COMMAND == init ]; then
     mount-master-locally
   fi
 
-  for MACHINE in $MACHINES; do
+  for MACHINE in "${HOSTNAMES[@]}"; do
     # Create a regular volume with LVM.
-    doit lvcreate -n $MACHINE-cow -l $EXTENTS $VGROUP $OVERLAY_DEVICE
+    doit lvcreate -n "$MACHINE-cow" -l $EXTENTS $VGROUP $OVERLAY_DEVICE
 
     # Use it as a raw devicemapper COW device.
     doit dmsetup create cached-$MACHINE --table "0 $MASTER_SIZE snapshot $CACHE_LOOP_DEVICE /dev/$VGROUP/$MACHINE-cow N 128"
@@ -341,9 +379,9 @@ if [ $COMMAND == start-updates ]; then
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE $OVERLAY_DEVICE
   doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$UPDATE_MACHINE
 
-  # HACK: Set MACHINES so that the update machine will have iSCSI enabled.
+  # HACK: Set HOSTNAMES so that the update machine will have iSCSI enabled.
   # TODO: Make this cleaner.
-  MACHINES=$UPDATE_MACHINE
+  HOSTNAMES=( "$UPDATE_MACHINE" )
 fi
 
 if [ $COMMAND == init -o $COMMAND == start-updates ]; then
@@ -357,12 +395,11 @@ if [ $COMMAND == init -o $COMMAND == start-updates ]; then
   doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
   doit tgtadm --lld iscsi --op new --mode portal --param portal=10.0.1.0:3260
 
-  TID=1
-  for MACHINE in $MACHINES; do
+  for MACHINE in "${HOSTNAMES[@]}"; do
+    TID=${HOST_TO_NUMBER[$MACHINE]}
     doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T iqn.2001-04.com.kentonshouse.protoman:$MACHINE
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b $EXPORT_DEVS/$MACHINE
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
-    TID=$(( TID + 1 ))
   done
 
   doit tgtadm --op update --mode sys --name State -v ready
