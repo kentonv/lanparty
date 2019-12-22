@@ -24,6 +24,7 @@ CACHE_LOOP_DEVICE=/dev/loop7
 # Use /dev/loop7 to avoid interfering with any loop devices LVM may have auto-created.
 LOCAL_MOUNT_POINT=/mnt/gamestation
 LOCAL_MOUNT_OPTIONS=offset=1048576
+NETWORK_INTERFACE=eno1
 
 # Parse machine configuration
 declare -a HOSTNAMES           # Array of hostnames, in order of declaration.
@@ -337,6 +338,14 @@ start-iscsi() {
   done
 }
 
+boot-hosts() {
+  bold "================ boot hosts ================"
+
+  for MACHINE in "$@"; do
+    doit etherwake -i $NETWORK_INTERFACE ${HOST_TO_MACADDR[$MACHINE]}
+  done
+}
+
 # ========================================================================================
 
 DRY_RUN=no
@@ -389,8 +398,8 @@ case "$COMMAND" in
       validate-hostnames "$@"
       HOSTNAMES=("$@")
     fi
-    echo 'ERROR: not yet implemented' >&2
-    exit 1
+
+    boot-hosts "${HOSTNAMES[@]}"
     ;;
 
   shutdown )
