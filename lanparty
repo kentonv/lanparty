@@ -336,7 +336,7 @@ start-iscsi() {
         exit 1;
     esac
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b "$DEVICE"
-    doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
+    doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I $IP_PREFIX.$TID
   done
 }
 
