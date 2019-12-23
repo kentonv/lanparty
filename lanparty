@@ -359,7 +359,7 @@ shutdown-hosts() {
     #
     # While we're at it, we take the opportunity to properly quote the arguments in the console
     # output.
-    COMMAND=( ssh -o "StrictHostKeyChecking no" "$SHUTDOWN_USERNAME@$MACHINE.$DOMAIN" -- 'shutdown /p /f' )
+    COMMAND=( ssh -o "StrictHostKeyChecking no" "$SHUTDOWN_USERNAME@$IP_PREFIX.${HOST_TO_NUMBER[$MACHINE]}" -- 'shutdown /p /f' )
     echo-command "${COMMAND[@]}" "&"
     if [ $DRY_RUN == no ]; then
       "${COMMAND[@]}" &
