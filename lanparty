@@ -6,6 +6,8 @@ set -euo pipefail
 # Implementation functions
 
 bold() {
+  # Like `echo` but use ANSI terminal codes to make the text bold -- unless the output is not
+  # a terminal.
   if [ -t 1 ]; then
     echo -ne '\033[1m'
     echo -n "$@"
@@ -79,6 +81,8 @@ usage() {
 }
 
 yesno() {
+  # Echo the arguments and prompt for a yes/no answer.
+
   echo -n "$@ (y/n) " >&2
 
   while read ANSWER; do
@@ -96,7 +100,8 @@ yesno() {
     esac
   done
 
-  # EOF?
+  # EOF. Not a terminal? Fail out.
+  # TODO: Maybe we should assume "yes" when run non-interactively?
   echo "ERROR: Can't continue without user input."
   exit 1
 }
@@ -122,6 +127,8 @@ is-caching-enabled() {
 }
 
 validate-hostnames() {
+  # Validate that each argument is a valid hostname defined in our config file.
+
   for MACHINE in "$@"; do
     if [ "${HOST_TO_NUMBER[$MACHINE]:-none}" == "none" ]; then
       echo "ERROR: No such host configured: $MACHINE" >&2
@@ -135,11 +142,14 @@ validate-hostnames() {
 }
 
 compute-extents() {
-  # Compute how many extents to assign to each machine, if there are $1 machines.
+  # Compute how many extents to assign to each machine's overlay, if there are $1 machines.
 
   if [ "${OVERLAY_DEVICE:-}" != "" ]; then
+    # The admin has configured a specific overlay device, so query free space on that device.
     FREE_EXTENTS=$(pvdisplay $OVERLAY_DEVICE -c | cut -d: -f10)
   else
+    # The admin has not configured a specific overlay device, so query all free space on the
+    # volume group.
     FREE_EXTENTS=$(vgdisplay $VGROUP -c | cut -d: -f16)
   fi
   MACHINE_COUNT=${1:-1}
@@ -147,26 +157,35 @@ compute-extents() {
   echo "$(( FREE_EXTENTS / MACHINE_COUNT ))"
 }
 
+# Regex detecting any character that Bash treats specially.
 NEEDS_QUOTING_PATTERN='[][$&|"\#!<>;()*?~`'"'"']'
 
 echo-command() {
   # Echo a shell command to standard output, making sure to quote it appropriately so that it can
   # be copied and pasted.
 
+  # We'd like to echo something that could actually be copy/pasted into a shell and would work
+  # correctly. To that end, we should make sure arguments are properly quoted.
   local -a EXPANSION
   local -a OUTPUT
   for ARG in "$@"; do
     EXPANSION=( $ARG )
     if [ "${EXPANSION[0]}" != "$ARG" ] ||
        [[ "$ARG" =~ $NEEDS_QUOTING_PATTERN ]]; then
+      # This argument contains characters that need quoting or escaping.
+
       # Hack: Don't escape trailing &, we probably intended to print it like that.
       if [ "$ARG" != "&" ]; then
+        # OK, wrap the whole argument in single quotes. If it contains any single quotes, replace
+        # that with '"'"'... ugh.
         ARG="'$(sed -e "s/'/'\"'\"'/g" <<< "$ARG")'"
       fi
     fi
     OUTPUT+=( "$ARG" )
   done
 
+  # If we're echoing to a terminal, and we're not in dry-run mode, make the command bold. That way,
+  # echoed commands are easy to distinguish from the output of the commands, if they have any.
   if [ $DRY_RUN == no -a -t 1 ]; then
     # Make it bold.
     echo -ne '\033[1m'
@@ -178,6 +197,8 @@ echo-command() {
 }
 
 doit() {
+  # Echo and then execute the given command -- unless we're in dry-run mode, in which case we only
+  # echo.
   echo-command "$@"
   if [ $DRY_RUN == no ]; then
     "$@"
@@ -212,31 +233,43 @@ mount-master-locally() {
 }
 
 stop-iscsi() {
+  # Instruct the iSCSI daemon to delist the given hostnames' volumes. Only hosts passed as
+  # parameters to this function are affected; the rest are left alone.
+  #
+  # This is idempotent -- it's not an error if the targets are already unpublished.
+
   bold "================ stop iscsi ================"
 
-  # If tgtd is running, remove the specific targets.
+  # If tgtd is running, remove the specific targets. (Since we configure tgtd dynamically, we can
+  # assume if it's not running, then any state related to our hosts is already lost.)
   if pidof tgtd > /dev/null; then
     NEED_SLEEP=no
     for MACHINE in "$@"; do
       TID=${HOST_TO_NUMBER[$MACHINE]}
+      # Check if the target is currently online.
       if tgtadm -C 0 --lld iscsi --op show --mode target --tid $TID > /dev/null 2>&1; then
+        # It is, so disable it.
         doit tgtadm -C 0 --lld iscsi --op delete --force --mode target --tid $TID
         NEED_SLEEP=yes
       fi
     done
 
     if [ $NEED_SLEEP == yes ]; then
-      # Give tgtd time to close resources.
+      # Give tgtd time to close resources. Otherwise, if we try to delete the underlying volumes
+      # too soon, we may get "device or resource busy" errors. It's too bad tgtadm itself doesn't
+      # wait until the resources are fully closed...
       doit sleep 1
     fi
   fi
 }
 
 delete-overlays() {
+  # Delete the overlay volumes for the given hostnames, and the updates overlay if present.
+  #
+  # This is idempotent -- it's not an error if the volumes don't exist.
+
   bold "================ delete overlays ================"
-  # Destroy all listed hosts that are currently up. (We do this for "init" as well because "init"
-  # will replace them with fresh versions, and for "start-updates" we always destroy all machines
-  # first.)
+
   for MACHINE in "$@"; do
     if [ -e /dev/mapper/cached-$MACHINE ]; then
       doit dmsetup remove /dev/mapper/cached-$MACHINE
@@ -253,6 +286,8 @@ delete-overlays() {
 }
 
 create-overlays() {
+  # Set up disposable (non-updates) copy-on-write overlays for the given hostnames.
+
   bold "================ create overlays ================"
 
   MASTER_SIZE=$(blockdev --getsz /dev/$VGROUP/$BASE_IMAGE)
@@ -278,6 +313,8 @@ create-overlays() {
 }
 
 merge-updates() {
+  # Merge updates back into the master image.
+
   bold "================ merge overlay ================"
 
   unmount-master-locally
@@ -286,6 +323,8 @@ merge-updates() {
 }
 
 start-updates() {
+  # Set up a copy-on-write overlay for installing updates.
+
   bold "================ create overlay ================"
 
   EXTENTS=$(compute-extents 1)
@@ -303,6 +342,13 @@ start-updates() {
 }
 
 start-iscsi() {
+  # Instruct the iSCSI server (tgtd) to publish the volumes for the given hostnames. If tgtd isn't
+  # already running, starts it. If it is running, already-published volumes are not affected.
+  #
+  # The first argument to start-iscsi must be either "updates" if we're publishing the update
+  # volume, or "cached" if we're publishing disposable volumes. The remaining arguments are the
+  # hostnames. (There should normally be only one hostname when publishing updates.)
+
   bold "================ start iscsi ================"
 
   local SOURCE=$1
@@ -312,18 +358,28 @@ start-iscsi() {
   if ! pidof tgtd > /dev/null; then
     doit tgtd
 
+    # By default tgtd will bind to all addresses. We don't want that, especially if this server
+    # is also being used as a router and therefore has both public and private interfaces. We don't
+    # have any way to authenticate machines, so we need to rely on the network being private.
+    # Tell tgtd to unbind from the wildcards (IPv4 and IPv6) and instead bind only to the
+    # configured server address.
     doit tgtadm --op update --mode sys --name State -v offline
-
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=0.0.0.0:3260
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
     doit tgtadm --lld iscsi --op new --mode portal --param portal=$SERVER_ADDR:3260
-
     doit tgtadm --op update --mode sys --name State -v ready
   fi
 
   for MACHINE in "$@"; do
+    # Apparently we must assign a "target ID" number to each machine even though it also has a
+    # name. Why? Probably because the names are IQNs which are so unweildy that no one wants to
+    # use them. Fine, whatever, we have ID numbers for each host, we'll use those.
     TID=${HOST_TO_NUMBER[$MACHINE]}
+
+    # Create the target.
     doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T $ISCSI_TARGET_PREFIX:$MACHINE
+
+    # Decide which device we're publishing.
     case $SOURCE in
       updates )
         DEVICE=/dev/$VGROUP/updates
@@ -335,12 +391,22 @@ start-iscsi() {
         echo "internal error: start-iscsi bad parameters" >&2
         exit 1;
     esac
+
+    # Add the "logical unit" to the target. Why can a target have multiple LUNs? Why not instead
+    # tell people to have multiple targets? Because iSCSI is over-engineered, that's why. Have you
+    # ever looked at nbd? THAT is how a block device protocol should be. Oh well.
     doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b "$DEVICE"
+
+    # Permit the designated machine's IP (and no others) to access this target. Note that this in
+    # itself doesn't provide any security since typically anyone on the internal network can claim
+    # to be this IP address. It does, however, prevent mistakes.
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I $IP_PREFIX.$TID
   done
 }
 
 boot-hosts() {
+  # Send ethernet wake-on-LAN packet to the given hostnames.
+
   bold "================ boot hosts ================"
 
   for MACHINE in "$@"; do
@@ -349,13 +415,17 @@ boot-hosts() {
 }
 
 shutdown-hosts() {
+  # Send SSH shutdown command to the given hostnames.
+
   bold "================ shutdown hosts ================"
 
   for MACHINE in "$@"; do
     # We inline doit() here so that we can let the SSH commands run in the background with &.
     # This is important because if a machine is already shut down, `ssh` will hang for a while
-    # before failing. We disable "StrictHostKeyChecking" because it won't work when ssh is running
-    # in the background.
+    # before failing. We disable "StrictHostKeyChecking" because the prompt won't work when ssh is
+    # running in the background. Since we're relying on public-key authentication and will only
+    # be executing one command that contains no secrets, there's no security risk from MITM. Also,
+    # this should be on a private network anyway.
     #
     # While we're at it, we take the opportunity to properly quote the arguments in the console
     # output.
@@ -366,6 +436,7 @@ shutdown-hosts() {
     fi
   done
 
+  # Wait for all ssh commands to complete.
   if [ $DRY_RUN == no ]; then
     bold wait
     wait
@@ -375,22 +446,31 @@ shutdown-hosts() {
 }
 
 show-status() {
+  # Show the status of all overlays, in particular what percentage of the overlay space has been
+  # consumed.
+
   if is-updating; then
+    # In updates mode, the overlay is an LVM snapshot. Query using lvdisplay.
     PERCENT=$(lvdisplay "/dev/$VGROUP/updates" |
               grep "Allocated to snapshot" |
               sed -e 's/ *Allocated to snapshot *//')
     echo "updates: ${PERCENT}"
   else
+    # In regular mode, the overlays are raw device-mapper devices. Query using dmsetup.
     for MACHINE in "$@"; do
       if [ -e "/dev/mapper/cached-$MACHINE" ]; then
         STATUS=$(dmsetup status "cached-$MACHINE" | cut -d' ' -f 4)
         if [ "$STATUS" = Invalid ]; then
+          # This machine's overlay was filled up. The volume no longer works.
           echo "$MACHINE: exhausted"
         else
+          # dmsetup gives us a ratio of extents used vs. total, like "1234/4321". We want a
+          # percentage, so we pass the expression to `bc`, which can calculate one for us.
           PERCENT=$(echo "scale=2; 100*$STATUS" | bc)
           printf '%s: %0.2f%%\n' "$MACHINE" "$PERCENT"
         fi
       else
+        # This overlay is not currently configured.
         echo "$MACHINE: offline"
       fi
     done
@@ -445,9 +525,9 @@ DOMAIN=example.com
 # Note that this doesn't have to be a real domain! You can invent your own
 # TLD if you want, like "lanparty". Then your machines would have names like
 # "cutman.lanparty", etc. If you set up a DNS server, you can make these
-# names actually resolvable (within your private network, at least). But even
-# if you don't set up a DNS server, it doesn't really matter if the domain is
-# real.
+# names actually resolvable (within your private network, at least). If you
+# aren't setting up a DNS server, then this domain is not really used for
+# anything at all, so then it matters even less if it's real.
 
 SERVER_ADDR=10.0.0.1
 # The address of the iSCSI server. This actually matters. Clients will be
