@@ -376,12 +376,10 @@ shutdown-hosts() {
 
 show-status() {
   if is-updating; then
-    for MACHINE in "$@"; do
-      PERCENT=$(lvdisplay "/dev/$VGROUP/updates" |
-                grep "Allocated to snapshot" |
-                sed -e 's/ *Allocated to snapshot *//')
-      echo "updates: ${PERCENT}"
-    done
+    PERCENT=$(lvdisplay "/dev/$VGROUP/updates" |
+              grep "Allocated to snapshot" |
+              sed -e 's/ *Allocated to snapshot *//')
+    echo "updates: ${PERCENT}"
   else
     for MACHINE in "$@"; do
       if [ -e "/dev/mapper/cached-$MACHINE" ]; then
