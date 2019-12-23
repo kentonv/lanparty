@@ -2,9 +2,11 @@
 
 ## Introduction
 
-This repository contains scripts that I use to manage a fleet of twelve identical machines used for LAN parties.
+My house ([see below](#background-my-house)) fetaures twelve identical machines used for LAN parties. This repository contains the script I use to manage them, and a guide to creating a similar setup. I use this for gaming, but the setup could be just as useful for office machines, internet cafes, school computer labs, and the like.
 
-Normally, this would have two huge problems:
+## The Magic Sauce
+
+Normally, maintaining twelve machines used by random guests would have two huge problems:
 
 * Every machine would need to be updated before each party. With games regularly pushing multi-GB updates these days, this would take forever.
 * Guests could easily mess up a machine at a party, requiring me to wipe it and start over, taking even more time.
@@ -26,7 +28,7 @@ Results:
 * At the end of a party, the overlays are simply deleted, wiping out any changes any guest may have made. This, again, takes no time.
 * Each overlay need only be big enough to store the *changes* made during a party, which are typically minimal. 20GB per overlay is plenty, even if the master image is terabytes in size.
 
-## What is this repository?
+## How to do it yourself
 
 This repository contains the script I use to manage the computers, as well as a guide to help you replicate my setup. This repo will help you:
 
@@ -35,9 +37,7 @@ This repository contains the script I use to manage the computers, as well as a 
 * Set up and tear down overlays for parties, as well as arrange to install updates, using a convenient script.
 * Install Windows 10 directly to an iSCSI device.
 
-## How to use it
-
-See [the guide](guide.md).
+[To get started, see the guide »](guide.md)
 
 ## Background: My House
 
@@ -65,13 +65,13 @@ Cable tubes run from the server room to all the machines, allowing cabling to be
 
 The house is designed by master architect [Richard Varda, FAIA](https://vardaarchitecture.com/) (my father). The game station paneling and all techincal details were designed by me.
 
-I have written about the house in the past:
+I wrote about the house way back in 2011:
 
 * [Original reveal blog post](http://kentonsprojects.blogspot.com/2011/12/lan-party-optimized-house.html)
 * [The back story](http://kentonsprojects.blogspot.com/2011/12/lan-party-house-back-story.html)
 * [Technical design and FAQ](http://kentonsprojects.blogspot.com/2011/12/lan-party-house-technical-design-and.html)
 
-The house was covered in the media back in 2011:
+The house was covered in the media at that time, based on my blog posts:
 
 * [Hacker News](https://news.ycombinator.com/item?id=3342044)
 * [Reddit](https://www.reddit.com/r/gaming/comments/na0vv/lanparty_optimized_house/)
