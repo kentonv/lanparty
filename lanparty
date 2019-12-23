@@ -53,21 +53,29 @@ usage() {
   bold '  status'
   echo '    Shows the current state of all machines'
   echo
-  bold '  configure [dhcp|dns]'
+  bold '  configure [dhcp|dns|dns-zone|dns-reverse]'
   echo '    Generates configuration snippets, written to standard output. The argument'
   echo '    specifies what to configure:'
   bold '      (no argument)'
   echo '        Generates a template config file for this script itself. This should'
-  echo "        typically be saved to /etc/$SCRIPT_NAME.conf and then edited to enter your"
-  echo '        specific configuration.'
+  echo "        typically be saved to /etc/$SCRIPT_NAME.conf and then edited to enter"
+  echo '        your specific configuration.'
   bold '      dhcp'
   echo '        Generates configuration for ISC DHCP server, derived from'
   echo "        $SCRIPT_NAME.conf. Typically you would place this in:"
   echo '          /etc/dhcp/dhcp.conf'
   bold '      dns'
   echo '        Generates configuration for BIND 9 DNS server, derived from'
-  echo "        $SCRIPT_NAME.conf. Typically you would add this to:"
-  echo '          /etc/bind/zones/YOUR-DOMAIN.db'
+  echo "        $SCRIPT_NAME.conf. Append this to (on Debian-derived systems):"
+  echo '          /etc/bind/named.conf'
+  bold '      dns-zone'
+  echo '        Generates zone definition for BIND 9 DNS server, derived from'
+  echo "        $SCRIPT_NAME.conf. Write this to the filename referenced in"
+  echo '        the generated named.conf configuration.'
+  bold '      dns'
+  echo '        Generates reverse lookup for BIND 9 DNS server, derived from'
+  echo "        $SCRIPT_NAME.conf. Write this to the filename referenced in"
+  echo '        the generated named.conf configuration.'
 }
 
 yesno() {
@@ -308,7 +316,7 @@ start-iscsi() {
 
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=0.0.0.0:3260
     doit tgtadm --lld iscsi --op delete --mode portal --param portal=[::]:3260
-    doit tgtadm --lld iscsi --op new --mode portal --param portal=$ISCSI_SERVER_ADDR:3260
+    doit tgtadm --lld iscsi --op new --mode portal --param portal=$SERVER_ADDR:3260
 
     doit tgtadm --op update --mode sys --name State -v ready
   fi
@@ -435,6 +443,24 @@ IP_PREFIX=10.0.0
 
 DOMAIN=example.com
 # The domain name under which the above hostnames are to be found.
+#
+# Note that this doesn't have to be a real domain! You can invent your own
+# TLD if you want, like "lanparty". Then your machines would have names like
+# "cutman.lanparty", etc. If you set up a DNS server, you can make these
+# names actually resolvable (within your private network, at least). But even
+# if you don't set up a DNS server, it doesn't really matter if the domain is
+# real.
+
+SERVER_ADDR=10.0.0.1
+# The address of the iSCSI server. This actually matters. Clients will be
+# configured to connect to this address. The server will be configured to
+# bind to this address (and only this address).
+#
+# Note that there is NO AUTHENTICATION on the iSCSI server. You should make
+# sure is exposed only on a private, trusted network.
+
+SERVER_HOSTNAME=server
+# The hostname of the server machine (within the domain specified above).
 
 ISCSI_TARGET_PREFIX=iqn.2019-12.com.example.my-hostname
 # This probably doesn't matter.
@@ -461,14 +487,6 @@ ISCSI_TARGET_PREFIX=iqn.2019-12.com.example.my-hostname
 # same as anyone else's -- for no practical reason. Neither clients nor
 # servers will actually parse the contents of this string. It's just a
 # string. You can probably put whatever you want in it and it'll be fine.
-
-ISCSI_SERVER_ADDR=10.0.0.1
-# The address of the iSCSI server. This actually matters. Clients will be
-# configured to connect to this address. The server will be configured to
-# bind to this address (and only this address).
-#
-# Note that there is NO AUTHENTICATION on the iSCSI server. You should make
-# sure is exposed only on a private, trusted network.
 
 SERVER_NETWORK_INTERFACE=eth0
 # Network interface corresponding to the above server address.
@@ -601,7 +619,7 @@ configure-dhcp() {
 # This text should be placed in: /etc/dhcp/dhcpd.conf
 
 option domain-name "$DOMAIN";
-option domain-name-servers $ISCSI_SERVER_ADDR;
+option domain-name-servers $SERVER_ADDR;
 # Tell all clients to use this server as the DNS server, and set the search
 # domain. This allows computers in the network to reference each other by name.
 #
@@ -636,7 +654,7 @@ subnet $IP_PREFIX.0 netmask 255.255.255.0 {
   option broadcast-address $IP_PREFIX.255;
   # Basic network settings.
 
-  option routers $ISCSI_SERVER_ADDR;
+  option routers $SERVER_ADDR;
   # Set ourselves as the router. This assumes that the server has been
   # configured as a router, which in turn requires that it have two network
   # interfaces (one internal, one external). I highly recommend using Linux as
@@ -700,6 +718,109 @@ __EOF__
   done
 
   echo "}"
+}
+
+reverse-ip() {
+  IFS=. read -a OCTETS <<< "$1"
+  declare -a REVERSE_OCTETS
+  for OCTET in $OCTETS; do
+    REVERSE_OCTETS=("$OCTET" "${REVERSE_OCTETS[@]}")
+  done
+  echo "${REVERSE_OCTETS[*]}" | tr ' ' '.'
+}
+
+configure-dns() {
+  REVERSE_IP_PREFIX=$(reverse-ip "$IP_PREFIX")
+
+  cat << __EOF__
+// Configuration auto-generated by '$SCRIPT_NAME'.
+// This should be added to named.conf. On Debian-derived systems, append to:
+//   /etc/bind/named.conf.local
+
+zone "$DOMAIN" {
+  type master;
+  file "/etc/bind/zones/$DOMAIN.db";
+  // Generate this file using: $SCRIPT_NAME configure dns-zone
+};
+
+zone "$REVERSE_IP_PREFIX.in-addr.arpa" {
+  type master;
+  file "/etc/bind/zones/rev.$REVERSE_IP_PREFIX.in-addr.arpa";
+  // Generate this file using: $SCRIPT_NAME configure dns-reverse
+};
+
+// End configuration auto-generated by '$SCRIPT_NAME'.
+__EOF__
+}
+
+configure-dns-zone() {
+  cat << __EOF__
+; Configuration auto-generated by '$SCRIPT_NAME'.
+; On Debian-derived systems, this text should be placed in:
+;   /etc/bind/zones/$DOMAIN.db
+;
+; You must then add the following to /etc/bind/named.conf.local:
+;   zone "$DOMAIN" {
+;     type master;
+;     file "/etc/bind/zones/$DOMAIN.in-addr.arpa";
+;   };
+
+\$ORIGIN $DOMAIN
+\$TTL 3600
+@ IN SOA $SERVER_HOSTNAME.$DOMAIN. root.$DOMAIN. (
+    2020010101   ; Irrelevant for non-replicated servers.
+    86400        ; Irrelevant for non-replicated servers.
+    3600         ; Irrelevant for non-replicated servers.
+    86400        ; Irrelevant for non-replicated servers.
+    3600         ; TTL for NXDOMAIN responses ("not found").
+    )
+@ IN NS $SERVER_HOSTNAME.$DOMAIN.
+
+$SERVER_HOSTNAME IN A $SERVER_ADDR
+
+__EOF__
+
+  for HOSTNAME in "${HOSTNAMES[@]}"; do
+    echo "$HOSTNAME IN A $IP_PREFIX.${HOST_TO_NUMBER[$HOSTNAME]}"
+  done
+}
+
+configure-dns-reverse() {
+  REVERSE_IP_PREFIX=$(reverse-ip "$IP_PREFIX")
+
+  cat << __EOF__
+; Configuration auto-generated by '$SCRIPT_NAME'.
+; On Debian-derived systems, this text should be placed in:
+;   /etc/bind/zones/rev.$REVERSE_IP_PREFIX.in-addr.arpa
+;
+; You must then add the following to /etc/bind/named.conf.local:
+;   zone "$REVERSE_IP_PREFIX.in-addr.arpa" {
+;     type master;
+;     file "/etc/bind/zones/rev.$REVERSE_IP_PREFIX.in-addr.arpa";
+;   };
+
+\$ORIGIN $DOMAIN
+\$TTL 3600
+@ IN SOA $SERVER_HOSTNAME.$DOMAIN. root.$DOMAIN. (
+    2020010101   ; Irrelevant for non-replicated servers.
+    86400        ; Irrelevant for non-replicated servers.
+    3600         ; Irrelevant for non-replicated servers.
+    86400        ; Irrelevant for non-replicated servers.
+    3600         ; Timeout for NXDOMAIN responses ("not found").
+    )
+@ IN NS $SERVER_HOSTNAME.$DOMAIN.
+
+__EOF__
+
+  SERVER_ID="${SERVER_ADDR#$IP_PREFIX.}"
+  if [ "$SERVER_ID" != "$SERVER_ADDR" ]; then
+    echo "$SERVER_ID IN PTR $SERVER_HOSTNAME.$DOMAIN."
+    echo
+  fi
+
+  for HOSTNAME in "${HOSTNAMES[@]}"; do
+    echo "${HOST_TO_NUMBER[$HOSTNAME]} IN PTR $HOSTNAME.$DOMAIN."
+  done
 }
 
 # ========================================================================================
@@ -885,8 +1006,13 @@ case "$COMMAND" in
           configure-dhcp
           ;;
         dns )
-          echo "not implemented" >&2
-          exit 1
+          configure-dns
+          ;;
+        dns-zone )
+          configure-dns-zone
+          ;;
+        dns-reverse )
+          configure-dns-reverse
           ;;
         * )
           echo "ERROR: Unknown configuration: $1" >&2
