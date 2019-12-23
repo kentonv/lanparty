@@ -230,9 +230,6 @@ delete-overlays() {
   # will replace them with fresh versions, and for "start-updates" we always destroy all machines
   # first.)
   for MACHINE in "$@"; do
-    if [ -e $EXPORT_DEVS/$MACHINE ]; then
-      doit rm $EXPORT_DEVS/$MACHINE
-    fi
     if [ -e /dev/mapper/cached-$MACHINE ]; then
       doit dmsetup remove /dev/mapper/cached-$MACHINE
     fi
@@ -263,29 +260,17 @@ create-overlays() {
     mount-master-locally
   fi
 
-  if [ ! -e $EXPORT_DEVS ]; then
-    doit mkdir -p $EXPORT_DEVS
-  fi
-
   for MACHINE in "$@"; do
     # Create a regular volume with LVM.
     doit lvcreate -n "$MACHINE-cow" -l $EXTENTS $VGROUP ${OVERLAY_DEVICE:-}
 
     # Use it as a raw devicemapper COW device.
     doit dmsetup create cached-$MACHINE --table "0 $MASTER_SIZE snapshot $CACHE_LOOP_DEVICE /dev/$VGROUP/$MACHINE-cow N 128"
-
-    doit ln -s /dev/mapper/cached-$MACHINE $EXPORT_DEVS/$MACHINE
   done
 }
 
 merge-updates() {
   bold "================ merge overlay ================"
-
-  for MACHINE in "$@"; do
-    if [ -e $EXPORT_DEVS/$MACHINE ]; then
-      doit rm $EXPORT_DEVS/$MACHINE
-    fi
-  done
 
   unmount-master-locally
   doit lvconvert --merge /dev/$VGROUP/updates
@@ -304,18 +289,16 @@ start-updates() {
     mount-master-locally
   fi
 
-  if [ ! -e $EXPORT_DEVS ]; then
-    doit mkdir -p $EXPORT_DEVS
-  fi
-
   # Creating the updates machine. Use a regular LVM snapshot so that we can easily merge it back
   # later.
   doit lvcreate -c 64k -n updates -l $EXTENTS -s /dev/$VGROUP/$BASE_IMAGE ${OVERLAY_DEVICE:-}
-  doit ln -s /dev/$VGROUP/updates $EXPORT_DEVS/$UPDATE_MACHINE
 }
 
 start-iscsi() {
   bold "================ start iscsi ================"
+
+  local SOURCE=$1
+  shift
 
   # Start tgtd if not running.
   if ! pidof tgtd > /dev/null; then
@@ -333,7 +316,18 @@ start-iscsi() {
   for MACHINE in "$@"; do
     TID=${HOST_TO_NUMBER[$MACHINE]}
     doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T $ISCSI_TARGET_PREFIX:$MACHINE
-    doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b $EXPORT_DEVS/$MACHINE
+    case $SOURCE in
+      updates )
+        DEVICE=/dev/$VGROUP/updates
+        ;;
+      cached )
+        DEVICE=/dev/mapper/cached-$MACHINE
+        ;;
+      * )
+        echo "internal error: start-iscsi bad parameters" >&2
+        exit 1;
+    esac
+    doit tgtadm -C 0 --lld iscsi --op new --mode logicalunit --tid $TID --lun 1 -b "$DEVICE"
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I ALL
   done
 }
@@ -375,14 +369,10 @@ shutdown-hosts() {
 show-status() {
   if is-updating; then
     for MACHINE in "$@"; do
-      if [ -e $EXPORT_DEVS/$MACHINE ]; then
-        PERCENT=$(lvdisplay "/dev/$VGROUP/updates" |
-                  grep "Allocated to snapshot" |
-                  sed -e 's/ *Allocated to snapshot *//')
-        echo "$MACHINE: ${PERCENT} (update mode)"
-      else
-        echo "$MACHINE: offline"
-      fi
+      PERCENT=$(lvdisplay "/dev/$VGROUP/updates" |
+                grep "Allocated to snapshot" |
+                sed -e 's/ *Allocated to snapshot *//')
+      echo "updates: ${PERCENT}"
     done
   else
     for MACHINE in "$@"; do
@@ -525,15 +515,6 @@ OVERLAY_DEVICE=/dev/sdb
 # in this case you should make sure that the base image's disk is completely
 # full so that it doesn't get used. (Placing an overlay on the same disk as
 # the base image could hurt performance.)
-
-EXPORT_DEVS=/dev/gamestations
-# Directory which will be populated with the block devices representing each
-# machine's disk.
-#
-# We'll actually populate this directory with symlinks to other devices under
-# /dev/\$VGROUP or /dev/mapper.
-#
-# TODO: Maybe remove this.
 
 CACHE_LOOP_DEVICE=/dev/loop7
 # Loopback device that can be used to create a page-caching layer on top of
@@ -699,7 +680,7 @@ case "$COMMAND" in
     stop-iscsi "${HOSTNAMES[@]}"
     delete-overlays "${HOSTNAMES[@]}"
     create-overlays "${HOSTNAMES[@]}"
-    start-iscsi "${HOSTNAMES[@]}"
+    start-iscsi cached "${HOSTNAMES[@]}"
     ;;
 
   destroy )
@@ -756,7 +737,7 @@ case "$COMMAND" in
     stop-iscsi "${HOSTNAMES[@]}"
     delete-overlays "${HOSTNAMES[@]}"
     start-updates
-    start-iscsi "$UPDATE_MACHINE"
+    start-iscsi updates "$UPDATE_MACHINE"
     ;;
 
   merge )
