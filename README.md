@@ -1,4 +1,4 @@
-# Kenton's LAN Party Management Script
+# Kenton's LAN Party House Management Script
 
 ## Introduction
 
@@ -11,7 +11,7 @@ Normally, maintaining twelve machines used by random guests would have two huge 
 * Every machine would need to be updated before each party. With games regularly pushing multi-GB updates these days, this would take forever.
 * Guests could easily mess up a machine at a party, requiring me to wipe it and start over, taking even more time.
 
-But, I have solved this problems!
+But, I have solved these problems!
 
 * I only install updates once, and they become immediately available to all machines -- no need even to "clone" the disk image.
 * Any changes made by guests at a party are trivially wiped at the end of the party.
@@ -32,6 +32,7 @@ Results:
 
 This repository contains the script I use to manage the computers, as well as a guide to help you replicate my setup. This repo will help you:
 
+* Create a master volume and space for overlays using LVM.
 * Configure DHCP, tftp, iPXE, and iSCSI for netboot.
 * Configure a private DNS server so your machines can name each other (optional).
 * Set up and tear down overlays for parties, as well as arrange to install updates, using a convenient script.
