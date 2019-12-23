@@ -147,7 +147,7 @@ compute-extents() {
   echo "$(( FREE_EXTENTS / MACHINE_COUNT ))"
 }
 
-NEEDS_QUOTING_PATTERN='[$&|"\#!<>;()*?~`'"'"']'
+NEEDS_QUOTING_PATTERN='[][$&|"\#!<>;()*?~`'"'"']'
 
 echo-command() {
   # Echo a shell command to standard output, making sure to quote it appropriately so that it can
