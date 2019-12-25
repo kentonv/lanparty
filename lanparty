@@ -516,8 +516,12 @@ airman     10   00:00:00:00:00:00
 bubbleman  11   00:00:00:00:00:00
 quickman   12   00:00:00:00:00:00
 crashman   13   00:00:00:00:00:00
-flashman   14   00:00:00:00:00:00"
-# Table of machines managed by this script. Each line contains three columns:
+flashman   14   00:00:00:00:00:00
+
+my-phone   51   00:00:00:00:00:00
+my-laptop  52   00:00:00:00:00:00"
+# Table of machines and devices on your network, especially those managed
+# by this script. Each line contains three columns:
 # - The machine's hostname. The script will help you set up DNS for these!
 # - The machine's ID number. This will be used as the last octet of the
 #   machine's IP address, as well as other places where a numeric identifier
@@ -535,6 +539,20 @@ flashman   14   00:00:00:00:00:00"
 # ID numbers are chosen to match the "serial numbers" assigned to each boss
 # in the game itself, allowing you to use megaman.fandom.com as a makeshift
 # DNS service...
+#
+# We've also defined `my-phone` and `my-laptop`, which are some other
+# machines that commonly connect to the network. These are optional, but if
+# you list them, the `$SCRIPT_NAME configure` command will include these
+# when generating DHCP and DNS configuration, which is convenient.
+#
+# The server machine should NOT be listed on this table.
+
+NETBOOT_MACHINES="cutman gutsman iceman bombman fireman elecman metalman airman bubbleman quickman crashman flashman"
+# The set of machines from the above table which will netboot over iSCSI.
+# Any machines not listed here are assumed to be other devices on your
+# network. DHCP and DNS config will be generated for them, but no disk
+# images will be allocated. In this example, `my-phone` and `my-laptop`
+# are not netboot machines, so we don't list them here.
 
 IP_PREFIX=10.0.0
 # The first three octets of each machine's IP address.
@@ -552,12 +570,9 @@ DOMAIN=example.com
 # anything at all, so then it matters even less if it's real.
 
 SERVER_ADDR=10.0.0.1
-# The address of the iSCSI server. This actually matters. Clients will be
-# configured to connect to this address. The server will be configured to
-# bind to this address (and only this address).
-#
-# Note that there is NO AUTHENTICATION on the iSCSI server. You should make
-# sure is exposed only on a private, trusted network.
+# The internal-network address of the server. Clients will be configured to
+# connect to this address, and server daemons will be configured to bind to
+# this address (and only this address).
 
 SERVER_HOSTNAME=server
 # The hostname of the server machine (within the domain specified above).
@@ -767,7 +782,7 @@ subnet $IP_PREFIX.0 netmask 255.255.255.0 {
 }
 
 group {
-  # Declare parameters specific to our machines.
+  # Declare parameters specific to our netboot machines.
 
   if exists user-class and option user-class = "iPXE" {
     # The client is PXE-booting using iPXE, which they probably downloaded in
@@ -814,6 +829,19 @@ __EOF__
     echo "    hardware ethernet ${HOST_TO_MACADDR[$HOSTNAME]};"
     echo "    fixed-address $IP_PREFIX.${HOST_TO_NUMBER[$HOSTNAME]};"
     echo "    option root-path \"$ISCSI_TARGET_PREFIX:$HOSTNAME\";"
+    echo "  }"
+  done
+
+  echo "}"
+  echo ""
+  echo "group {"
+  echo "  # Declare non-netboot machines with no special parameters."
+  echo ""
+
+  for HOSTNAME in "${UNMANAGED_HOSTNAMES[@]}"; do
+    echo "  host $HOSTNAME {"
+    echo "    hardware ethernet ${HOST_TO_MACADDR[$HOSTNAME]};"
+    echo "    fixed-address $IP_PREFIX.${HOST_TO_NUMBER[$HOSTNAME]};"
     echo "  }"
   done
 
@@ -881,7 +909,7 @@ $SERVER_HOSTNAME IN A $SERVER_ADDR
 
 __EOF__
 
-  for HOSTNAME in "${HOSTNAMES[@]}"; do
+  for HOSTNAME in "${ALL_HOSTNAMES[@]}"; do
     echo "$HOSTNAME IN A $IP_PREFIX.${HOST_TO_NUMBER[$HOSTNAME]}"
   done
 }
@@ -920,7 +948,7 @@ __EOF__
     echo
   fi
 
-  for HOSTNAME in "${HOSTNAMES[@]}"; do
+  for HOSTNAME in "${ALL_HOSTNAMES[@]}"; do
     echo "${HOST_TO_NUMBER[$HOSTNAME]} IN PTR $HOSTNAME.$DOMAIN."
   done
 }
@@ -964,17 +992,33 @@ if [ -e "$CONFIG_NAME" ]; then
   HAS_CONFIG=yes
 
   # Parse machine configuration
-  declare -a HOSTNAMES           # Array of hostnames, in order of declaration.
+  declare -a HOSTNAMES           # Array of netboot hostnames.
+  declare -a ALL_HOSTNAMES       # Array of all hostnames, in order of declaration.
+  declare -a UNMANAGED_HOSTNAMES # Hostnames that are NOT netboot.
   declare -A HOST_TO_NUMBER      # Maps hostnames to ID numbers.
   declare -A HOST_TO_MACADDR     # Maps hostnames to MAC addresses.
 
   while read HOSTNAME NUMBER MACADDR JUNK; do
     if [ "$HOSTNAME" != "" ]; then
-      HOSTNAMES+=("$HOSTNAME")
+      ALL_HOSTNAMES+=("$HOSTNAME")
       HOST_TO_NUMBER[$HOSTNAME]=$NUMBER
       HOST_TO_MACADDR[$HOSTNAME]=$MACADDR
     fi
   done <<< "$MACHINE_TABLE"
+
+  validate-hostnames $NETBOOT_MACHINES
+  HOSTNAMES=($NETBOOT_MACHINES)
+
+  declare -A HOST_IS_NETBOOT
+  for HOSTNAME in ${HOSTNAMES[@]}; do
+    HOST_IS_NETBOOT[$HOSTNAME]=yes
+  done
+
+  for HOSTNAME in ${ALL_HOSTNAMES[@]}; do
+    if [ ${HOST_IS_NETBOOT[$HOSTNAME]:-no} != yes ]; then
+      UNMANAGED_HOSTNAMES+=("$HOSTNAME")
+    fi
+  done
 fi
 
 require-configured() {
