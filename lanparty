@@ -52,6 +52,12 @@ usage() {
   bold '  merge'
   echo '    Merges updates (started with start-updates) into the master image.'
   echo
+  bold '  authorize-addr HOST ADDR'
+  echo '    Authorize the IP address ADDR to attach to the iSCSI volume for HOST.'
+  echo "    Normally, only the host's own address is allowed. This command exists"
+  echo '    for troubleshooting purposes and should rarely be needed. This change'
+  echo '    will be reverted the next time you run "destry" or "merge".'
+  echo
   bold '  status'
   echo '    Shows the current state of all machines'
   echo
@@ -402,6 +408,10 @@ start-iscsi() {
     # to be this IP address. It does, however, prevent mistakes.
     doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I $IP_PREFIX.$TID
   done
+}
+
+authorize-addr() {
+  doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid ${HOST_TO_NUMBER[$1]} -I $2
 }
 
 boot-hosts() {
@@ -1141,6 +1151,18 @@ case "$COMMAND" in
 
     stop-iscsi "${HOSTNAMES[@]}"
     merge-updates
+    ;;
+
+  authorize-addr )
+    require-configured || exit 1
+    require-root || exit 1
+    if [ "$#" -ne 2 ]; then
+      echo 'ERROR: "authorize-addr" takes exactly two arguments.' >&2
+      usage >&2
+      exit 1
+    fi
+
+    authorize-addr "$@"
     ;;
 
   status )

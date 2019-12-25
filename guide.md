@@ -320,6 +320,10 @@ This guide won't go into the details of setting up Samba since there's nothing s
 
 ### Create Windows boot media
 
+You need to create a bootable USB drive containing the Windows 10 installer. To do that, you need to use the Windows Media Creation Tool, which, unfortunately (but unsurprisingly), only runs on Windows.
+
+[Start here.](https://www.microsoft.com/en-us/software-download/windows10ISO)
+
 ### Enter "updates" mode
 
 Whenever you want to make changes to your master image that you intend to keep, you need to use the `lanparty` script to set up your server in "updates" mode.
@@ -362,7 +366,11 @@ If your registry contains `ControlSet002` and/or `CurrentControlSet` in addition
 
 **Editing registry offline**
 
-But how do we edit the registry without booting? There are multiple approaches. You could temporarily mount the iSCSI volume from an existing, working Windows machine, or from a Windows Preinstallation Environment (WinPE) that you booted from USB or maybe even from PXE. Many guides exist describing these options.
+But how do we edit the registry without booting? There are multiple approaches. The easiest thing to do is use an existing, working, Windows 10 machine (e.g. a laptop or even a VM) to mount the iSCSI volume and run regedit on it. Note that in order to permit this other machine to mount the iSCSI volume, you will need to run:
+
+    lanparty authorize-addr HOST ADDR
+
+where `HOST` is the hostname that normally boots from this disk, and `ADDR` is the IP address of the machine that needs to access it. Otherwise, normally the iSCSI volumes are only exposed to their respective machines' addresses.
 
 In order to edit a registry offline (i.e., edit a registry other than the one of the system that is running regedit):
 
