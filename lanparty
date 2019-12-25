@@ -963,6 +963,13 @@ require-configured() {
   fi
 }
 
+require-root() {
+  if [ "$(whoami)" != root ]; then
+    echo "ERROR: You need to be root to do this." >&2
+    exit 1
+  fi
+}
+
 if [ $# -eq 0 ]; then
   echo "ERROR: missing command" >&2
   usage >&2
@@ -975,6 +982,7 @@ shift
 case "$COMMAND" in
   init )
     require-configured || exit 1
+    require-root || exit 1
     if is-updating; then
       echo "ERROR: You must either merge or destroy updates first." >&2
       exit 1
@@ -992,6 +1000,7 @@ case "$COMMAND" in
 
   destroy )
     require-configured || exit 1
+    require-root || exit 1
     if is-updating; then
       yesno "There are unmerged updates. Really destroy them?" || exit 1
     fi
@@ -1006,6 +1015,7 @@ case "$COMMAND" in
 
   boot )
     require-configured || exit 1
+    require-root || exit 1
     if [ "$#" -gt 0 ]; then
       validate-hostnames "$@"
       HOSTNAMES=("$@")
@@ -1026,6 +1036,7 @@ case "$COMMAND" in
 
   start-updates )
     require-configured || exit 1
+    require-root || exit 1
     if [ "$#" -ne 1 ]; then
       echo 'ERROR: "start-updates" takes exactly one argument.' >&2
       usage >&2
@@ -1049,6 +1060,7 @@ case "$COMMAND" in
 
   merge )
     require-configured || exit 1
+    require-root || exit 1
     if [ "$#" -gt 0 ]; then
       echo 'ERROR: "merge" does not take an argument.' >&2
       usage >&2
@@ -1065,6 +1077,7 @@ case "$COMMAND" in
 
   status )
     require-configured || exit 1
+    require-root || exit 1
     if [ "$#" -gt 0 ]; then
       echo 'ERROR: "status" does not take an argument.' >&2
       usage >&2
