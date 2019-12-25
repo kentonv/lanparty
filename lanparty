@@ -445,6 +445,23 @@ shutdown-hosts() {
   fi
 }
 
+ratio-to-percent() {
+  # $1 should be a ratio, like "123/456". We'll return a percentage to 2 decimal places.
+  # Bash doesn't have floating-point math but we can do it all with integers.
+
+  # Calculate ten-thousanths as an integer.
+  PER10K=$(( 10000 * $1 ))
+
+  # Zero-pad up to at least three digits.
+  PER10K=$(printf "%03d" $PER10K)
+
+  # Separate digits after decimal.
+  [[ "$PER10K" =~ ^(.*)(..)$ ]]
+
+  # Output!
+  echo ${BASH_REMATCH[1]}.${BASH_REMATCH[2]}
+}
+
 show-status() {
   # Show the status of all overlays, in particular what percentage of the overlay space has been
   # consumed.
@@ -465,9 +482,9 @@ show-status() {
           echo "$MACHINE: exhausted"
         else
           # dmsetup gives us a ratio of extents used vs. total, like "1234/4321". We want a
-          # percentage, so we pass the expression to `bc`, which can calculate one for us.
-          PERCENT=$(echo "scale=2; 100*$STATUS" | bc)
-          printf '%s: %0.2f%%\n' "$MACHINE" "$PERCENT"
+          # percentage.
+          PERCENT=$(ratio-to-percent "$STATUS")
+          echo "$MACHINE: $PERCENT%"
         fi
       else
         # This overlay is not currently configured.
