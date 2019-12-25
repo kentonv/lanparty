@@ -63,21 +63,6 @@ During installation, you should tell the installer to manage your disks with LVM
 
 You should NOT configure any kind of encryption on the volumes you plan to use for the master image or overlays; it's better to perform encryption on the client side if desired. I also would recommend against encrypting the boot device, as this will force you to physically enter a password every time you boot your server; we aren't going to store any sensitive secrets on this disk anyway. If you do plan to store secrets on your server, you can create a separate partition for that and encrypt it.
 
-### Packages to install
-
-Do this:
-
-    apt install tgt isc-dhcp-server tftpd-hpa ipxe bind9 bc
-
-What this installs:
-
-* `tgt`: iSCSI server and management tools. For some reason iSCSI doesn't like the words "client" and "server" and instead uses "initiator" and "target".
-* `isc-dhcp-server`: DHCP, as you probably know, is the protocol that devices use to auto-detect network settings (IP address, gateway, DNS, etc.), by broadcasting a request to the network asking for someone to please tell them what to use. DHCP can also pass additional instructions to PXE-booting machines telling them where to find a boot image.
-* `tftpd-hpa`: Most PXE boot roms only know how to download a bootloader over Trivial File Transfer Protocol (TFTP), which is a weird UDP-based protocol for downloading a file one packet at a time. `tftpd` is a TFTP server which we'll use to serve the iPXE image, which in turn will enable the client machine to boot from iSCSI.
-* `ipxe`: This package provides the iPXE image itself, for us to serve.
-* `bind9`: A DNS server. We'll use this so that machines on our network can refer to each other by name. This is optional, but recommended.
-* `bc`: A calculator program. The `lanparty status` command invokes this to perform some floating-point arithmetic.
-
 ### Router (optional)
 
 While not strictly necessary, I recommend setting up your iSCSI server machine to also act as the gateway/router for your network, with NAT. Most people use the built-in functionality of the modem provided by their ISP for this. However, many modems have buggy firmware. For example, one modem I had could only handle a small number of simultaneous connections, and then would spontaneously reboot. Another modem hijacked the address `1.1.1.1`, effectively blocking access to Cloudflare's public DNS resolver (which rightfully owns this address). In both cases, the problems went away when the modem was switched to "bridge" mode, causing it to pass through packets unmodified. However, this requires you to run your own NAT / firewall behind the modem.
