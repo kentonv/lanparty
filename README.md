@@ -1,5 +1,15 @@
 # Kenton's LAN Party House Management Script
 
+<!-- TOC -->
+
+- [Kenton's LAN Party House Management Script](#kentons-lan-party-house-management-script)
+  - [Introduction](#introduction)
+  - [The Magic Sauce](#the-magic-sauce)
+  - [How to do it yourself](#how-to-do-it-yourself)
+  - [Background: My House](#background-my-house)
+
+<!-- /TOC -->
+
 ## Introduction
 
 My house ([see below](#background-my-house)) fetaures twelve identical machines used for LAN parties. This repository contains the script I use to manage them, and a guide to creating a similar setup. I use this for gaming, but the setup could be just as useful for office machines, internet cafes, school computer labs, and the like.
