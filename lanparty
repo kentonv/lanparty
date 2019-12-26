@@ -303,7 +303,7 @@ create-overlays() {
   # already.
   if ! is-caching-enabled; then
     unmount-master-locally
-    doit losetup-new --direct-io=off --read-only $CACHE_LOOP_DEVICE /dev/$VGROUP/$BASE_IMAGE
+    doit losetup --direct-io=off --read-only $CACHE_LOOP_DEVICE /dev/$VGROUP/$BASE_IMAGE
     mount-master-locally
   elif is-local-mount-point-configured && ! is-master-mounted-locally; then
     mount-master-locally
@@ -550,9 +550,9 @@ my-laptop  52   00:00:00:00:00:00"
 # in the game itself, allowing you to use megaman.fandom.com as a makeshift
 # DNS service...
 #
-# We've also defined `my-phone` and `my-laptop`, which are some other
+# We've also defined "my-phone" and "my-laptop", which are some other
 # machines that commonly connect to the network. These are optional, but if
-# you list them, the `$SCRIPT_NAME configure` command will include these
+# you list them, the "$SCRIPT_NAME configure" command will include these
 # when generating DHCP and DNS configuration, which is convenient.
 #
 # The server machine should NOT be listed on this table.
@@ -561,7 +561,7 @@ NETBOOT_MACHINES="cutman gutsman iceman bombman fireman elecman metalman airman 
 # The set of machines from the above table which will netboot over iSCSI.
 # Any machines not listed here are assumed to be other devices on your
 # network. DHCP and DNS config will be generated for them, but no disk
-# images will be allocated. In this example, `my-phone` and `my-laptop`
+# images will be allocated. In this example, "my-phone" and "my-laptop"
 # are not netboot machines, so we don't list them here.
 
 IP_PREFIX=10.0.0
@@ -587,7 +587,7 @@ SERVER_ADDR=10.0.0.1
 SERVER_HOSTNAME=server
 # The hostname of the server machine (within the domain specified above).
 
-ISCSI_TARGET_PREFIX=iqn.2019-12.com.example.my-hostname
+ISCSI_TARGET_PREFIX=iqn.2019-12.com.example.server
 # This probably doesn't matter.
 #
 # Prefix for iSCSI volume names. Unfortuantely, the designers of iSCSI were
@@ -772,7 +772,7 @@ subnet $IP_PREFIX.0 netmask 255.255.255.0 {
   # DHCP requests received on the network interface bound to this subnet
   # will be handled according to this block.
 
-  range $IP_PREFIX.100 $IP_PREFIX.254
+  range $IP_PREFIX.100 $IP_PREFIX.254;
   # For unrecognized devices, give them an IP in the range .100 to .254.
 
   option subnet-mask 255.255.255.0;
@@ -838,7 +838,7 @@ __EOF__
     echo "  host $HOSTNAME {"
     echo "    hardware ethernet ${HOST_TO_MACADDR[$HOSTNAME]};"
     echo "    fixed-address $IP_PREFIX.${HOST_TO_NUMBER[$HOSTNAME]};"
-    echo "    option root-path \"$ISCSI_TARGET_PREFIX:$HOSTNAME\";"
+    echo "    option root-path \"iscsi:$SERVER_ADDR:::1:$ISCSI_TARGET_PREFIX:$HOSTNAME\";"
     echo "  }"
   done
 
@@ -861,7 +861,7 @@ __EOF__
 reverse-ip() {
   IFS=. read -a OCTETS <<< "$1"
   declare -a REVERSE_OCTETS
-  for OCTET in $OCTETS; do
+  for OCTET in "${OCTETS[@]}"; do
     REVERSE_OCTETS=("$OCTET" "${REVERSE_OCTETS[@]}")
   done
   echo "${REVERSE_OCTETS[*]}" | tr ' ' '.'
@@ -898,13 +898,13 @@ configure-dns-zone() {
 ;   /etc/bind/zones/lanparty.db
 ;
 ; You must then add the following to /etc/bind/named.conf.local
-; (`lanparty configure dns` will generate this for you):
+; ("lanparty configure dns" will generate this for you):
 ;   zone "$DOMAIN" {
 ;     type master;
 ;     file "/etc/bind/zones/lanparty.db";
 ;   };
 
-\$ORIGIN $DOMAIN
+\$ORIGIN $DOMAIN.
 \$TTL 3600
 @ IN SOA $SERVER_HOSTNAME.$DOMAIN. root.$DOMAIN. (
     2020010101   ; Irrelevant for non-replicated servers.
@@ -933,13 +933,13 @@ configure-dns-reverse() {
 ;   /etc/bind/zones/lanparty-reverse.db
 ;
 ; You must then add the following to /etc/bind/named.conf.local
-; (`lanparty configure dns` will generate this for you):
+; ("lanparty configure dns" will generate this for you):
 ;   zone "$REVERSE_IP_PREFIX.in-addr.arpa" {
 ;     type master;
 ;     file "/etc/bind/zones/lanparty-reverse.db";
 ;   };
 
-\$ORIGIN $DOMAIN
+\$ORIGIN $REVERSE_IP_PREFIX.in-addr.arpa.
 \$TTL 3600
 @ IN SOA $SERVER_HOSTNAME.$DOMAIN. root.$DOMAIN. (
     2020010101   ; Irrelevant for non-replicated servers.
@@ -995,9 +995,14 @@ while [[ "${1:-}" =~ ^- ]]; do
   esac
 done
 
+SKIP_CONFIG=no
+if [ $# == 1 -a $1 == "configure" ]; then
+  SKIP_CONFIG=yes
+fi
+
 # Load config file.
 HAS_CONFIG=no
-if [ -e "$CONFIG_NAME" ]; then
+if [ -e "$CONFIG_NAME" -a $SKIP_CONFIG != yes ]; then
   . "$CONFIG_NAME"
   HAS_CONFIG=yes
 

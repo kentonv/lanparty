@@ -124,7 +124,7 @@ iface lo inet loopback
 # you'll need to figure out what name it has on your system.
 # `ip link show` will show all interfaces.
 auto eth0
-iface eth0 inet auto
+iface eth0 inet dhcp
     # Configure routing at startup.
     pre-up iptables-restore < /etc/iptables.rules
 
@@ -230,6 +230,8 @@ And then let's configure it. We're going to blow away the existing config, so ba
 
 Take a quick look at `/etc/dhcp/dhcpd.conf` and read the comments. If you plan to set up a DNS server later, then you probably don't need to change anything in here. If you don't plan a DNS server, you'll need to edit the `option domain-name-servers` line.
 
+You also need to edit `/etc/defaults/isc-dhcp-server` and edit the `INTERFACESv4=` line to list your internal network interface.
+
 Now restart the server to pick up the new config (it doesn't support `reload`):
 
     systemctl restart isc-dhcp-server
@@ -269,6 +271,7 @@ The `lanparty` script can generate configuration for you, based on the config yo
 
 There are three bits of config we need here. Note that the first step uses `>>` to append, while the others create new files:
 
+    mkdir -p /etc/bind/zones
     lanparty configure dns >> /etc/bind/named.conf.local
     lanparty configure dns-zone > /etc/bind/zones/lanparty.db
     lanparty configure dns-reverse > /etc/bind/zones/lanparty-reverse.db
@@ -304,7 +307,7 @@ Test your configuration by pinging one of your machine names:
 
 You can also test reverse lookup with `dig` (may require installing `dnsutils` package):
 
-    $ dig +x 10.0.0.3 +short
+    $ dig -x 10.0.0.3 +short
     cutman.example.com.
 
 ### Samba (optional)
