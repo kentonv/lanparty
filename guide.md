@@ -9,6 +9,7 @@
 - [Prerequisites](#prerequisites)
 - [Setting up the server](#setting-up-the-server)
   - [Basic Linux setup](#basic-linux-setup)
+  - [Network interface renaming](#network-interface-renaming)
   - [Router (optional)](#router-optional)
   - [The `lanparty` script](#the-lanparty-script)
   - [Wake-on-LAN](#wake-on-lan)
@@ -104,6 +105,60 @@ This guide works best with Debian or a Debian-derived distro like Ubuntu. The gu
 During installation, you should tell the installer to manage your disks with LVM. You should create at least two volume groups: one containing the disk that will hold the server's operating system, and another containing the disks you will use for the client machines' master image and overlays. If you want to use RAID anywhere in here, you should also configure that during installation.
 
 You should NOT configure any kind of encryption on the volumes you plan to use for the master image or overlays; it's better to perform encryption on the client side if desired. I also would recommend against encrypting the boot device, as this will force you to physically enter a password every time you boot your server; we aren't going to store any sensitive secrets on this disk anyway. If you do plan to store secrets on your server, you can create a separate partition for that and encrypt it.
+
+### Network interface renaming
+
+If you have multiple network interfaces (likely the case if you installed a 10 gigabit ethernet adapter), then there's a good chance Linux has assigned ridiculous names to them, like `enp2s0f1`, or worse, `rename2` (and changes every time you boot). What ever happened to the good old days of `eth0`?
+
+You're going to need to sort these out and determine which is which. Start by listing the interfaces:
+
+    ip link show
+
+Unfortunately, the output of this command is not particularly readable. It'll show you the interfaces, but doesn't really tell you which is which. Probably there's some flags you can pass to show more info? I never figured it out. Intsead, I've had more success with a utility called `ethtool`
+
+    apt install ethtool
+
+Now let's take a look at that `rename2` interface by typing `ethtool rename2`. On my machine, I see:
+
+```
+Settings for rename2:
+	Supported ports: [ FIBRE ]
+	Supported link modes:   10000baseT/Full
+	Supported pause frame use: Symmetric
+	Supports auto-negotiation: No
+	Supported FEC modes: Not reported
+	Advertised link modes:  10000baseT/Full
+	Advertised pause frame use: Symmetric
+	Advertised auto-negotiation: No
+	Advertised FEC modes: Not reported
+	Speed: 10000Mb/s
+	Duplex: Full
+	Port: Direct Attach Copper
+	PHYAD: 0
+	Transceiver: internal
+	Auto-negotiation: off
+	Supports Wake-on: d
+	Wake-on: d
+	Current message level: 0x00000007 (7)
+			       drv probe link
+	Link detected: yes
+```
+
+Notice the "Supported link modes" line. It says 10000baseT, i.e. 10 gigabit! This is our 10gigE adapter.
+
+Also useful is the last line, "Link detected: yes". If your device has multiple ports, this can help you find the one that's plugged in.
+
+If Linux has unhelpfully named your interface `rename2`, you'll want to fix that by editing:
+
+    /etc/udev/rules.d/70-persistent-net.rules
+
+This file might not exist yet; create it if not. Then you can add a line like so:
+
+    SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="00:00:00:00:00:00", ATTR{type}=="1", NAME="eno1"
+
+Replace `00:00:00:00:00:00` with the MAC address of the device. What this rule essentially says is: "When you see a device with this MAC address, give it this name." You'll probably need to reboot for this to take effect.
+
+If you have trouble, a useful debugging tool is to look for log lines about the interface in `dmesg`, e.g. run `dmesg | grep -5 rename2`.
 
 ### Router (optional)
 
