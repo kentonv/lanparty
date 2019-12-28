@@ -321,6 +321,28 @@ You may want to set up a Samba server for file sharing. In particular:
 
 This guide won't go into the details of setting up Samba since there's nothing special to it here. Many guides exist around the internet, but also, the file `/etc/samba/smb.conf` contains plenty of comments to get you started.
 
+But, for me, adding the following to the end of `smb.conf` was all it took:
+
+```
+# The master image, readable to anyone on the network.
+[master]
+   comment = Master image files
+   read only = yes
+   path = /mnt/master
+   guest ok = yes
+
+# The share folder, writable to anyone on the network.
+[share]
+   comment = Shared space
+   read only = no
+   path = /mnt/share
+   guest ok = yes
+```
+
+Then reload:
+
+    systemctl reload smbd
+
 ## Installing Windows 10
 
 ### Download Windows Installer ISO
