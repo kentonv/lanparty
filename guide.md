@@ -38,6 +38,7 @@
   - [Background defrag](#background-defrag)
   - [Monitoring network usage](#monitoring-network-usage)
   - [Canceled merge](#canceled-merge)
+  - [Mismatching hardware](#mismatching-hardware)
 
 <!-- /TOC -->
 
@@ -662,3 +663,11 @@ Random hints:
 ### Canceled merge
 
 If you do `lanparty merge`, but then cancel the command mid-merge (e.g. by pressing ctrl+C, disconnecting SSH, or suffering a power outage), fear not: LVM will keep merging in the background. However, you'll need to wait for it to finish before doing other `lanparty` commands. Use `lvdisplay` to see the current status.
+
+### Mismatching hardware
+
+I have only tested this technique with client machines that contained identical hardware, meaning that they all needed exactly the same drivers. This probably makes it easier to boot from identical disk images.
+
+However, I suspect that Windows could handle booting non-matching machines from the same image without too much additional trouble. My guess is that you would merely need to cycle through each machine running it in "updates" mode once, let Windows install the necessary drivers for that machine, and then merge them. Once you've done this with every machine, the master image ought to have the union of all necessary drivers, and so should be able to boot any machine... I think.
+
+Note that network drivers could be tricky. If a machine doesn't have the right network drivers, it won't be able to netboot at all. These days, practically all motherboards have a Realtek NIC built-in, so hopefully you'll only need the one driver there. If not, you may need to use the first machine to manually install network drivers for all machines. You may additionally need to edit the registry to tell Windows that the driver needs to be loaded during early boot. I don't have specific instructions on how to do this, so you'll need to do some Googling.
