@@ -61,7 +61,7 @@ usage() {
   bold '  status'
   echo '    Shows the current state of all machines'
   echo
-  bold '  configure [dhcp|dns|dns-zone|dns-reverse]'
+  bold '  configure [dhcp|dns|dns-zone|dns-reverse|ipxe]'
   echo '    Generates configuration snippets, written to standard output. The argument'
   echo '    specifies what to configure:'
   bold '      (no argument)'
@@ -78,12 +78,16 @@ usage() {
   echo '          /etc/bind/named.conf.local'
   bold '      dns-zone'
   echo '        Generates zone definition for BIND 9 DNS server, derived from'
-  echo "        $SCRIPT_NAME.conf. Write this to the filename referenced in"
-  echo '        the generated named.conf.local configuration.'
-  bold '      dns'
+  echo "        $SCRIPT_NAME.conf. Place this at:"
+  echo '          /etc/bind/zones/lanparty.db'
+  bold '      dns-reverse'
   echo '        Generates reverse lookup for BIND 9 DNS server, derived from'
-  echo "        $SCRIPT_NAME.conf. Write this to the filename referenced in"
-  echo '        the generated named.conf.local configuration.'
+  echo "        $SCRIPT_NAME.conf. Place this at:"
+  echo '          /etc/bind/zones/lanparty-reverse.db'
+  bold '      ipxe'
+  echo '        Generates a useful iPXE script that makes it easy to netboot an'
+  echo '        ISO image. Place this in:'
+  echo '          /var/lib/tftpboot/boot.ipxe'
 }
 
 yesno() {
@@ -842,11 +846,29 @@ __EOF__
     echo "  }"
   done
 
-  echo "}"
-  echo ""
-  echo "group {"
-  echo "  # Declare non-netboot machines with no special parameters."
-  echo ""
+  cat << __EOF__
+}
+
+group {
+  # Declare parameters for non-netboot machines.
+  #
+  # Normally, we expect such machines will not attempt to PXE-boot. However,
+  # if they do, let's give them something useful. Specifically, we'll give them
+  # the ability to boot any ISO image by entering the URL. This is super-useful
+  # for installing operating systems -- no need to use a separate machine to
+  # download the ISO nor create a USB stick.
+
+  if exists user-class and option user-class = "iPXE" {
+    filename "boot.ipxe";
+    # Run the iPXE script in /var/lib/tftpboot/boot.ipxe.
+    #
+    # '$SCRIPT_NAME configure ipxe' will generate a useful script for you.
+  } else {
+    filename "undionly.kpxe";
+  }
+
+  # Declare each known host and assign it a fixed address.
+__EOF__
 
   for HOSTNAME in "${UNMANAGED_HOSTNAMES[@]}"; do
     echo "  host $HOSTNAME {"
@@ -856,6 +878,20 @@ __EOF__
   done
 
   echo "}"
+}
+
+configure-ipxe() {
+  cat << '__EOF__'
+#!ipxe
+# This is an iPXE script which prompts the user to enter a name of any ISO
+# image found in the server's /var/lib/tftpboot/, then boots that image.
+# This is super-useful for installing operating systems.
+# Put this in: /var/lib/tftpboot/boot.ipxe
+echo -n Enter ISO to boot:
+read image
+initrd ${image}
+kernel memdisk iso raw
+__EOF__
 }
 
 reverse-ip() {
@@ -1199,6 +1235,9 @@ case "$COMMAND" in
           ;;
         dns-reverse )
           configure-dns-reverse
+          ;;
+        ipxe )
+          configure-ipxe
           ;;
         * )
           echo "ERROR: Unknown configuration: $1" >&2
