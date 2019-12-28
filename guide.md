@@ -18,11 +18,12 @@
   - [DNS server (optional)](#dns-server-optional)
   - [Samba (optional)](#samba-optional)
 - [Installing Windows 10](#installing-windows-10)
-  - [Create Windows boot media](#create-windows-boot-media)
+  - [Download Windows Installer ISO](#download-windows-installer-iso)
   - [Enter "updates" mode](#enter-updates-mode)
-  - [Boot the machine](#boot-the-machine)
+  - [Boot the machine into the Windows installer](#boot-the-machine-into-the-windows-installer)
   - [Install Windows 10](#install-windows-10)
   - [Work around `PAGE_FAULT_IN_NONPAGED_AREA`](#work-around-page_fault_in_nonpaged_area)
+  - [Avoiding Microsoft Sign-in](#avoiding-microsoft-sign-in)
   - [Set Up Windows 10](#set-up-windows-10)
   - [Set up SSH](#set-up-ssh)
   - [Merge changes](#merge-changes)
@@ -97,7 +98,7 @@ You will need:
 
 You need to install Linux on your server. This guide cannot cover all the details of how to do that, but there are many resources available on the internet.
 
-This guide works best with Debian or a Debian-derived distro like Ubuntu. The guide was tested using Debian 10 (Buster), and previously I had almost the same setup working on Ubuntu 18.04 (Bionic). With other distros, you may have to tweak the instructions a bit, as files may be located in different places, packages may have different names, etc.
+This guide works best with Debian or a Debian-derived distro like Ubuntu. The guide was tested using Ubuntu 18.04 (Bionic). With other distros, you may have to tweak the instructions a bit, as files may be located in different places, packages may have different names, etc.
 
 During installation, you should tell the installer to manage your disks with LVM. You should create at least two volume groups: one containing the disk that will hold the server's operating system, and another containing the disks you will use for the client machines' master image and overlays. If you want to use RAID anywhere in here, you should also configure that during installation.
 
@@ -240,7 +241,7 @@ Now restart the server to pick up the new config (it doesn't support `reload`):
 
 When your machines boot using their PXE-boot firmware, they will talk to your DHCP server, which will instruct them to download a file via TFTP. We need a TFTP server to serve that file. And the file we'll serve is iPXE, an advanced PXE bootloader that knows how to boot from iSCSI. Conveniently, we can get the iPXE image from a package, too.
 
-    apt install tftpd-hpa ipxe
+    apt install tftpd-hpa ipxe syslinux-common
 
 You'll want to edit the file `/etc/default/tftpd-hpa`, especially if you have set up routing, to make sure you're not answering TFTP requests from the internet:
 
@@ -253,11 +254,12 @@ TFTP_ADDRESS="10.0.0.1:69"   # Set to your server's INTERNAL address!
 TFTP_OPTIONS="--secure"
 ```
 
-`tftpd` will serve files from `/var/lib/tftpboot`. We need to make iPXE's `undionly.kpxe` show up there:
+`tftpd` will serve files from `/var/lib/tftpboot`. We need to make iPXE's `undionly.kpxe` show up there, as well as syslinux's `memdisk` utility:
 
     cp /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
+    cp /usr/lib/syslinux/memdisk /var/lib/tftpboot/memdisk
 
-(You could also use a symlink here, so that when the iPXE package gets updates, you start using them automatically. However, if iPXE works correctly, there is basically nothing you get out of updating it, and there is always a risk that it breaks. So, I like to make a copy and only update it explicitly as needed.)
+(You could also use symlinks here, so that when the packages get updates, you start using them automatically. However, if iPXE and `memdisk` work correctly, there is basically nothing you get out of updating them, and there is always a risk that they break. So, I like to make a copy and only update them explicitly as needed.)
 
 ### DNS server (optional)
 
@@ -321,11 +323,13 @@ This guide won't go into the details of setting up Samba since there's nothing s
 
 ## Installing Windows 10
 
-### Create Windows boot media
+### Download Windows Installer ISO
 
-You need to create a bootable USB drive containing the Windows 10 installer. To do that, you need to use the Windows Media Creation Tool, which, unfortunately (but unsurprisingly), only runs on Windows.
+You need to download a Windows 10 installer ISO image. [You can get this from Microsoft.](https://www.microsoft.com/en-us/software-download/windows10ISO)
 
-[Start here.](https://www.microsoft.com/en-us/software-download/windows10ISO)
+Do NOT burn the ISO to a DVD nor create a USB stick. Instead, download the ISO to your server. Place it at:
+
+    /var/lib/tftpboot/win10.iso
 
 ### Enter "updates" mode
 
@@ -337,21 +341,66 @@ Run:
 
 Replace HOST with the hostname of the machine you'll be using for installation.
 
-### Boot the machine
+### Boot the machine into the Windows installer
 
 In order for the Windows 10 installer to show an iSCSI volume as a valid installation target, it needs to find the volume listed in something called the iBFT (iSCSI Boot Firmware Table), a magical chunk of memory that is somehow passed off from the BIOS / early boot stage to the OS bootloader. The idea is supposed to be that if you have an Enterprise iSCSI NIC then it will initialize this table at startup.
 
-But, we don't have enterprise hardware. Instead, we have iPXE. If we can get iPXE to run _before_ the Windows 10 installer runs, then it will initialize the iBFT for us, and the Windows 10 installer will find it. But we don't actually want to boot from iSCSI, we want to boot from our Windows 10 installer USB stick. How do we do that?
+Moreover, the BIOS / early boot stage must explicitly tell Windows that "Yes, I am able to boot this device.", otherwise the installer will steadfastly refuse to let you install to the device even if it is visible.
 
-Well, fortuntaely, as your iSCSI volume is currently blank, booting from it will fail. iPXE will exit, and the BIOS will then go on to the next boot device, with iBFT loaded. So what you have to do is configure your BIOS such that it tries to boot from the network first, and then falls back to USB next.
+But, we don't have enterprise hardware. Instead, we have iPXE. If we can get iPXE to run _before_ the Windows 10 installer runs, and have iPXE itself pretend to be the BIOS while starting the Windows 10 installer, then iPXE will initialize the iBFT for us, and the Windows 10 installer will find it and let us install to it.
+
+One more catch: iPXE only knows how to netboot. It explicitly doesn't know how to boot from a DVD or USB stick. That's why we didn't create one earlier. Instead, we'll tell `iPXE` to load our ISO file over the network, and then run it using `memdisk`.
+
+First, configure your client machine to boot from the network. In the BIOS, set the network adapter as the first and only boot option.
+
+Now, let it boot, but watch closely, because we have to hit a key at the right moment. Your BIOS will hand off to the network adapter firmware, which will query your DHCP server. It'll then download and run iPXE, and you'll see something like this:
+
+    iPXE initializing devices...ok
+
+    iPXE -- Open Source Network Boot Firmware -- http://ipxe.org
+    Features: HTTP iSCSI DNS TFTP AoE FCoE TFTP COMBOOT ELF PXE PXEXT
+
+    Press Ctrl-B for the iPXE command line...
+
+Press Ctrl-B now! You only get a second or two. If you miss it, then iPXE will attempt to boot from iSCSI, which will presumably fail since the master image isn't formatted yet.
+
+If you got it right, you're now at the iPXE prompt:
+
+    iPXE>
+
+You need to type a series of commands:
+
+    dhcp
+    set keep-san 1
+    sanhook iscsi:10.0.1.0:::1:iqn.2019-12.com.example:cutman
+    initrd win10.iso
+    kernel memdisk iso raw
+    boot
+
+Replace `iscsi:10.0.1.0:::1:iqn.2019-12.com.example` with the value of `ISCSI_TARGET_PREFIX` from your `lanparty.conf`, and replace `cutman` with your client's host name.
+
+Let's break down what this does:
+
+* `dhcp`: Configures the network and obtains an IP address.
+* `set keep-san 1`: Tells iPXE to pass off the upcoming iSCSI connection to the Windows 10 installer via iBFT.
+* `sanhook iscsi:10.0.1.0:::1:iqn.2019-12.com.example:cutman`: Tells iPXE where to find our iSCSI volume, to place in iBFT.
+* `initrd win10.iso`: Loads `win10.iso` into local RAM, so that we can boot it as a ramdisk. (This will take some time. TFTP is a rather inefficient file transfer protocol.) (The command is called `initrd` because when booting Linux, you would use this to load an `initrd` image, which provides an early-stage root filesystem which knows how to boot the real system.)
+* `kernel memdisk iso raw`: Loads `memdisk` as our "kernel", passing it boot parameters to tell it that we're going to boot an ISO loaded as a ramdisk.
+* `boot`: Run it.
+
+Anyway, the Windows 10 installer should now start.
+
+PROTIP: Any time you want to boot an ISO image in the future, you can use the iPXE command line to load it over the network like above. Never again will you need to dig up a USB stick nor burn a DVD!
 
 ### Install Windows 10
 
-Follow the on-screen instructions to install Windows 10 to the iSCSI volume.
+Follow the on-screen instructions to install Windows 10 to the iSCSI volume. This part should "just work", up until the first reboot.
 
 ### Work around `PAGE_FAULT_IN_NONPAGED_AREA`
 
-Eventually, your machine will reboot, and it will now attempt to boot directly from iSCSI. Unfortunately, due to a Windows 10 bug, this step will likely fail with a Blue Screen Of Death reporting `PAGE_FAULT_IN_NONPAGED_AREA`.
+Eventually, your machine will reboot, and it will now attempt to boot directly from iSCSI (you should NOT interrupt the process with ctrl+B this time).
+
+Unfortunately, due to a Windows 10 bug, this step will likely fail with a Blue Screen Of Death reporting `PAGE_FAULT_IN_NONPAGED_AREA`, and then go into a boot loop.
 
 This appears to happen when the system page file is located on the iSCSI device. While locating the page file on iSCSI worked fine under Windows 7, it appears to be broken in Windows 10. Unfortunately, Windows defaults to setting up a page file on the primary disk, so when the primary disk is iSCSI, it is broken out-of-the-box.
 
@@ -385,15 +434,68 @@ In order to edit a registry offline (i.e., edit a registry other than the one of
 
 The offline registry file will appear in the tree under `HKEY_LOCAL_MACHINE` with the name you chose. Edits you make to keys within it will usually be saved automatically, although it is advised that you explicitly unload the offline hive before closing regedit to be sure. This is a very strange UI, but that's apparently how it is done.
 
+### Avoiding Microsoft Sign-in
+
+When Windows 10 boots for the first time, it'll try to force you to sign in with a Microsoft account. This is NOT what you want. Your machines are intended for use by guests, and you probably don't want to force your guests to log into their own Microsoft account. You could set up Windows using an online account and then create a local account later, but it's much cleaner to avoid signing into an online account at all.
+
+Unfortunately, a recent update makes it so that the Windows 10 setup process won't give you the option to create a local account. However, there's a trick: If the machine cannot reach the internet, then a local account will be allowed.
+
+Of course, your machine needs continuous access to the LAN, since it's booting over iSCSI. So, you can't unplug just the one machine. Instead, you could unplug your internet modem temporarily. Or, if you set up your server as a router, you can temporarily block internet access for the one specific machine like so:
+
+    iptables -A FORWARD -s cutman -j DROP
+
+Replace `cutman` with the particular machine's name. Voilà, no more internet! If you're already at the sign-in prompt in Windows 10 setup, click the back-arrow button in the upper-left. The account creation prompt will come up again, but this time won't prompt you to sign into a Microsoft account. It simply says "Who's going to use this PC?" and lets you set a username.
+
+For what it's worth, I like to use "LAN Party Guest" as the username. I set no password for this account and enable auto-login.
+
+Once you've gotten past account creation, you can unblock the machine like so:
+
+    iptables -D FORWARD -s cutman -j DROP
+
 ### Set Up Windows 10
 
-With that out of the way, Windows 10 should now boot up successfully! You can now set it up normally. Install whatever software you want.
+Once your account is created, and you've said "no" to all of Microsoft's myriad requests to surveil you, Windows 10 will finish setting up.
+
+From here it's up to you to install apps and configure your machine however you want.
 
 ### Set up SSH
 
-In order to use the `lanparty` script to shut down your machines (really convenient at the end of a party!), you will need to enable SSH access.
+In order to use the `lanparty` script to shut down your machines (really convenient at the end of a party!), you will need to enable SSH access. Believe it or not, Windows 10 now has built-in support for being an SSH server! Even Windows 10 Home edition!
 
-TODO: Fill this in.
+To install the SSH server:
+
+* Open the "Settings" app.
+* Go to Apps -> Apps & features -> Optional Features.
+* Click "Add a feature".
+* From the list, choose "OpenSSH Server" and click "Install".
+
+Next, we should configure the server for public key authentication, so that you can SSH to it without a password, which we need for automation purposes. (If you set your user account's password blank, then OpenSSH won't let you log in at all by default.)
+
+This part is a bit awkward, because our user account has administrator access. By default, administrators cannot just stick `.ssh/authorized_keys` into their home directory like normal. Instead, a special administrators key file needs to be modified. Worse, if you don't get the permissions on this file exactly right, it doesn't work.
+
+* Browse to `C:\ProgramData\ssh\`. Note that `ProgramData` is a hidden folder! (Whyyyy?)
+* Copy your id_rsa.pub into this folder, and rename it to, exactly, `administrators_authorized_keys`. (If you aren't familiar with `id_rsa.pub`, look up guides on SSH public key authentication.)
+* Change the permissions on this file so that it is owned by the group "Administrators", NO ONE has permission to write to it, and the group "Administrators" has permission only to read. You will have to disable inheritance of permissions from the parent folder.
+
+With that done, now you can start the SSH server:
+
+* Open the "Services" control panel applet (just type "services" in the main Windows search bar).
+* Find "OpenSSH SSH Server" in the list.
+* Start it.
+* Change its "Startup Type" to "Automatic", so that it starts on next boot.
+
+Now try SSHing! If it doesn't work... you probably got one of the steps wrong around `administrators_authorized_keys`. Yes, it really does need to have the very specific permissions described. Why? Who knows! Some sort of bizarre security check? But why does the _owner_ of the file have to be denied _write_ permission? That accomplishes nothing, since the owner can re-enable write permission at any time.
+
+If you're struggling to figure out why SSH login isn't working, try this:
+
+* Under "Services", stop OpenSSH.
+* Run a command prompt (cmd) as Administrator.
+* In the command prompt, do: `sshd -ddd` This will run the SSH server to accept _one_ connection and then show debug info.
+* Try connecting again, and see what the console prints.
+
+Yes, you need three 'd's in `-ddd`. Any fewer, and it won't tell you if the permissions on `administrators_authorized_keys` are wrong; it'll just report that no key matched.
+
+Anyway, now that you set this up, you should be able to use `lanparty shutdown` to shut down machines!
 
 ### Merge changes
 
