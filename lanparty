@@ -711,10 +711,11 @@ LOCAL_MOUNT_OPTIONS=offset=1048576
 # Extra mount options to use when mounting the base image.
 #
 # Typically, the base image includes a partition table, and it's actually the
-# first partition that you want to mount. In my experience this partition is
-# offset 1 MiB from the start of the disk image, hence the default shown above.
-# However, if this is wrong, you can determine the correct value using fdisk.
-# For example, if you do:
+# first partition that you want to mount. Since modern partitioning tools like
+# to align partitions to megabyte boundaries, the first partition is almost
+# always offset 1 MiB from the start of the disk, hence the default offset
+# shown above. However, if this is wrong, you can determine the correct value
+# using fdisk. For example, if you do:
 #
 #   fdisk -l /dev/lanparty-disks/master
 #
