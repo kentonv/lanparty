@@ -57,19 +57,19 @@ In 2011 I built a house in Palo Alto, California optimized for LAN parties. It h
 
 They fold up and look nice when not in use:
 
-![Photo showing six monitors surrounded by maple wood paneling along a curved wall.](photo1.jpeg)
+![Photo showing six monitors surrounded by maple wood paneling along a curved wall.](photos/photo1.jpeg)
 
 And they fold out like this:
 
-![Photo showing that the paneling folds out and monitors slide down to form computer stations.](photo2.jpeg)
+![Photo showing that the paneling folds out and monitors slide down to form computer stations.](photos/photo2.jpeg)
 
 Another room has six more:
 
-![Photo showing another room with similar game stations along the walls.](photo3.jpeg)
+![Photo showing another room with similar game stations along the walls.](photos/photo3.jpeg)
 
 The actual game machines are on a rack in the back room, along with the server.
 
-![Photo of a server rack full of 3U computers.](rack1.jpeg) ![Side view of the server rack, revealing that the machines are named after Mega Man bosses.](rack2.jpeg)
+![Photo of a server rack full of 3U computers.](photos/rack1.jpeg) ![Side view of the server rack, revealing that the machines are named after Mega Man bosses.](photos/rack2.jpeg)
 
 Cable tubes run from the server room to all the machines, allowing cabling to be upgraded as needed. Currently, I run very long HDMI and USB cables through these tubes.
 
