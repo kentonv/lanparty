@@ -11,7 +11,7 @@
 
 ## Introduction
 
-My house ([see below](#background-my-house)) fetaures twelve identical machines used for LAN parties. This repository contains the script I use to manage them, and a guide to creating a similar setup. I use this for gaming, but the setup could be just as useful for office machines, internet cafes, school computer labs, and the like.
+My house ([see below](#background-my-house)) features twelve identical machines used for LAN parties. This repository contains the script I use to manage them, and a guide to creating a similar setup. I use this for gaming, but the setup could be just as useful for office machines, internet cafes, school computer labs, and the like.
 
 ## The Magic Sauce
 
