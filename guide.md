@@ -589,6 +589,10 @@ Once the machine has fully powered off, it's time to merge your installation int
 
 This will take a while, but you'll see progress updates on-screen as it goes.
 
+### Register Windows licenses
+
+The first time you boot each machine into Windows 10 (e.g. following the instructions in the next section), it will recognize that the machine is not licensed and complain. Go through the normal process to acquire a Windows 10 license for that machine. Once licensed, the machine is registered in Microsoft's database, so it will never ask you again. Yes, this seems to imply that the machines will phone home to Microsoft for a license check every time you re-initialize their images from the master image, which is sort of disturbing... but it's a whole lot more convenient than what was needed with previous versions!
+
 ## LAN party operations
 
 This section describes how I use the `lanparty` script to operate an actual LAN party.
