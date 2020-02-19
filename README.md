@@ -51,7 +51,7 @@ This repository contains the script I use to manage the computers, as well as a 
 
 ## Background: My House
 
-**ALERT: [The house is for sale!!!](https://lanpartyhouse.com/)** _What can I say... I had a baby. And I've mooved to Austin, to be closer to my team at work. After nine years in the house, it's time to pass it on to a new owner._
+**ALERT: [The house is for sale!!!](https://lanpartyhouse.com/)** _What can I say... I had a baby. And I've moved to Austin, to be closer to my team at work. After nine years in the house, it's time to pass it on to a new owner._
 
 In 2011 I built a house in Palo Alto, California optimized for LAN parties. It has computer stations built into the walls.
 
