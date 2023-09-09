@@ -764,6 +764,9 @@ option domain-name-servers $SERVER_ADDR;
 # which would be weird since you'd be referencing private-network IP
 # addresses...
 
+next-server $SERVER_ADDR;
+# Set IP address for TFTP downloads.
+
 default-lease-time 86400;
 max-lease-time 604800;
 authoritative;
