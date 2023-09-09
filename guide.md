@@ -310,12 +310,16 @@ TFTP_ADDRESS="10.0.0.1:69"   # Set to your server's INTERNAL address!
 TFTP_OPTIONS="--secure"
 ```
 
-`tftpd` will serve files from `/var/lib/tftpboot`. We need to make iPXE's `undionly.kpxe` show up there, as well as syslinux's `memdisk` utility:
+`tftpd` will serve files from `/var/lib/tftpboot`. We want to create a file there called `ipxe` which contains our iPXE boot image. If your client machines are modern machines that support UEFI boot over the network, use the file `ipxe.efi`:
 
-    cp /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/undionly.kpxe
-    cp /usr/lib/syslinux/memdisk /var/lib/tftpboot/memdisk
+    cp /usr/lib/ipxe/ipxe.efi /var/lib/tftpboot/ipxe
 
-(You could also use symlinks here, so that when the packages get updates, you start using them automatically. However, if iPXE and `memdisk` work correctly, there is basically nothing you get out of updating them, and there is always a risk that they break. So, I like to make a copy and only update them explicitly as needed.)
+If you have older machines that prefer legacy PXE boot, `undionly.pxe` supports that:
+
+    # FOR OLD MACHINES ONLY
+    cp /usr/lib/ipxe/undionly.kpxe /var/lib/tftpboot/ipxe
+
+(You could also use a symlink here, so that when the packages get updates, you start using them automatically. However, if iPXE works correctly, there is basically nothing you get out of updating it, and there is always a risk that it breaks. So, I like to make a copy and only update it explicitly as needed.)
 
 ### DNS server (optional)
 

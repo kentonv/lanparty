@@ -828,12 +828,7 @@ group {
     # directly into your network cards' ROM, which is... terrifying, to be
     # honest.
 
-    filename "undionly.kpxe";
-    # For whatever reason, the iPXE binary calls itself "undionly.kpxe". I
-    # guess you could rename it if you want, but it took me a long long time
-    # to figure out that this "undionly.kpxe" as found in various download
-    # packages was in fact the iPXE binary, and I wanted to save you the
-    # confusion.
+    filename "ipxe";
   }
 
   # Declare each known host and assign it a fixed address.
@@ -865,7 +860,7 @@ group {
     #
     # '$SCRIPT_NAME configure ipxe' will generate a useful script for you.
   } else {
-    filename "undionly.kpxe";
+    filename "ipxe";
   }
 
   # Declare each known host and assign it a fixed address.
