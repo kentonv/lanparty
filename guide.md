@@ -18,16 +18,22 @@
   - [tftp and iPXE](#tftp-and-ipxe)
   - [DNS server (optional)](#dns-server-optional)
   - [Samba (optional)](#samba-optional)
-- [Installing Windows 10](#installing-windows-10)
-  - [Download Windows Installer ISO](#download-windows-installer-iso)
-  - [Enter "updates" mode](#enter-updates-mode)
-  - [Boot the machine into the Windows installer](#boot-the-machine-into-the-windows-installer)
-  - [Install Windows 10](#install-windows-10)
-  - [Work around `PAGE_FAULT_IN_NONPAGED_AREA`](#work-around-page_fault_in_nonpaged_area)
+- [Installing Windows](#installing-windows)
+  - [Direct net install vs. temporary local disk?](#direct-net-install-vs-temporary-local-disk)
+  - [Install normally on one machine](#install-normally-on-one-machine)
   - [Avoiding Microsoft Sign-in](#avoiding-microsoft-sign-in)
-  - [Set Up Windows 10](#set-up-windows-10)
+  - [Preparing for iSCSI](#preparing-for-iscsi)
+  - [Extract the image](#extract-the-image)
+  - [Wipe the original drive](#wipe-the-original-drive)
+  - [Fix the GPT partition table](#fix-the-gpt-partition-table)
+- [Your first netboot](#your-first-netboot)
+  - [Enter "updates" mode](#enter-updates-mode)
+  - [Start your machine](#start-your-machine)
+  - [Resize your disk](#resize-your-disk)
+  - [Install software](#install-software)
   - [Set up SSH](#set-up-ssh)
   - [Merge changes](#merge-changes)
+  - [Test booting all machines (and license Windows)](#test-booting-all-machines-and-license-windows)
 - [LAN party operations](#lan-party-operations)
   - [Installing updates before a party.](#installing-updates-before-a-party)
   - [Starting the party](#starting-the-party)
@@ -403,120 +409,31 @@ Then reload:
 
     systemctl reload smbd
 
-## Installing Windows 10
+## Installing Windows
 
-### Download Windows Installer ISO
+### Direct net install vs. temporary local disk?
 
-You need to download a Windows 10 installer ISO image. [You can get this from Microsoft.](https://www.microsoft.com/en-us/software-download/windows10ISO)
+Ideally, we'd directly install Windows to our iSCSI volume and never have a need for a local disk at all. [An older version of this guide](https://github.com/kentonv/lanparty/blob/52826c71b5545f6915c6f1ab5f5be2cbc14738c1/guide.md) described an approach to doing that.
 
-Do NOT burn the ISO to a DVD nor create a USB stick. Instead, download the ISO to your server. Place it at:
+Unfortunately, this method has proven to be extremely fragile. Although the Windows installer ostensibly has support for this, Microsoft does not appear to test this mode, and it frequently doesn't work. In particular:
 
-    /var/lib/tftpboot/win10.iso
+* If the network drivers bundled with the installer don't quite work, the installer may BSOD in one of multiple places. I variously observed a `DRIVER_IRQL_NOT_LESS_OR_EQUAL` stop code in `NDIS.SYS` during the first stage of copying files, and `INACCESSIBLE_BOOT_DEVICE` in a later stage, which I suspect may be due to this problem (though I'm not sure). Perhaps this could be fixed by building a custom installer image with up-to-date drivers, but I didn't try that as it looked like a fair amount of work.
 
-### Enter "updates" mode
+* The installer will configure Windows with a page file by default, but Windows will BSOD on startup if the page file is on iSCSI. In the guide below, we solve this problem by deconfiguring paging before we move the image to iSCSI. But if you install directly to iSCSI, you have the difficult task of trying to deconfigure the page file when you cannot even boot the system. (The old guide covered how to do this, but it was a pain.)
 
-Whenever you want to make changes to your master image that you intend to keep, you need to use the `lanparty` script to set up your server in "updates" mode.
+Due to these problems, I do not recommend trying to install directly to iSCSI.
 
-Run:
+### Install normally on one machine
 
-    lanparty start-updates HOST
+Instead of installing directly to the network, we start by installing Windows the regular way, to a local disk on one machine. This means you will have to install a disk on that machine, but only temporarily.
 
-Replace HOST with the hostname of the machine you'll be using for installation.
+We are going to want to transfer the disk image later, so it helps to use a small disk partition. I had success telling Windows to allocate only 64GB of disk space. You can grow it later once the data is transferred to iSCSI. (Annoyingly, Windows likes to put the "recovery partition" immediately after the main partition, which you may end up needing to delete in order to grow the main partition...)
 
-### Boot the machine into the Windows installer
-
-In order for the Windows 10 installer to show an iSCSI volume as a valid installation target, it needs to find the volume listed in something called the iBFT (iSCSI Boot Firmware Table), a magical chunk of memory that is somehow passed off from the BIOS / early boot stage to the OS bootloader. The idea is supposed to be that if you have an Enterprise iSCSI NIC then it will initialize this table at startup.
-
-Moreover, the BIOS / early boot stage must explicitly tell Windows that "Yes, I am able to boot this device.", otherwise the installer will steadfastly refuse to let you install to the device even if it is visible.
-
-But, we don't have enterprise hardware. Instead, we have iPXE. If we can get iPXE to run _before_ the Windows 10 installer runs, and have iPXE itself pretend to be the BIOS while starting the Windows 10 installer, then iPXE will initialize the iBFT for us, and the Windows 10 installer will find it and let us install to it.
-
-One more catch: iPXE only knows how to netboot. It explicitly doesn't know how to boot from a DVD or USB stick. That's why we didn't create one earlier. Instead, we'll tell `iPXE` to load our ISO file over the network, and then run it using `memdisk`.
-
-First, configure your client machine to boot from the network. In the BIOS, set the network adapter as the first and only boot option.
-
-Now, let it boot, but watch closely, because we have to hit a key at the right moment. Your BIOS will hand off to the network adapter firmware, which will query your DHCP server. It'll then download and run iPXE, and you'll see something like this:
-
-    iPXE initializing devices...ok
-
-    iPXE -- Open Source Network Boot Firmware -- http://ipxe.org
-    Features: HTTP iSCSI DNS TFTP AoE FCoE TFTP COMBOOT ELF PXE PXEXT
-
-    Press Ctrl-B for the iPXE command line...
-
-Press Ctrl-B now! You only get a second or two. If you miss it, then iPXE will attempt to boot from iSCSI, which will presumably fail since the master image isn't formatted yet.
-
-If you got it right, you're now at the iPXE prompt:
-
-    iPXE>
-
-You need to type a series of commands:
-
-    dhcp
-    set keep-san 1
-    sanhook iscsi:10.0.1.0:::1:iqn.2019-12.com.example:cutman
-    initrd win10.iso
-    kernel memdisk iso raw
-    boot
-
-Replace `iscsi:10.0.1.0:::1:iqn.2019-12.com.example` with the value of `ISCSI_TARGET_PREFIX` from your `lanparty.conf`, and replace `cutman` with your client's host name.
-
-Let's break down what this does:
-
-* `dhcp`: Configures the network and obtains an IP address.
-* `set keep-san 1`: Tells iPXE to pass off the upcoming iSCSI connection to the Windows 10 installer via iBFT.
-* `sanhook iscsi:10.0.1.0:::1:iqn.2019-12.com.example:cutman`: Tells iPXE where to find our iSCSI volume, to place in iBFT.
-* `initrd win10.iso`: Loads `win10.iso` into local RAM, so that we can boot it as a ramdisk. (This will take some time. TFTP is a rather inefficient file transfer protocol.) (The command is called `initrd` because when booting Linux, you would use this to load an `initrd` image, which provides an early-stage root filesystem which knows how to boot the real system.)
-* `kernel memdisk iso raw`: Loads `memdisk` as our "kernel", passing it boot parameters to tell it that we're going to boot an ISO loaded as a ramdisk.
-* `boot`: Run it.
-
-Anyway, the Windows 10 installer should now start.
-
-PROTIP: Any time you want to boot an ISO image in the future, you can use the iPXE command line to load it over the network like above. Never again will you need to dig up a USB stick nor burn a DVD!
-
-### Install Windows 10
-
-Follow the on-screen instructions to install Windows 10 to the iSCSI volume. This part should "just work", up until the first reboot.
-
-### Work around `PAGE_FAULT_IN_NONPAGED_AREA`
-
-Eventually, your machine will reboot, and it will now attempt to boot directly from iSCSI (you should NOT interrupt the process with ctrl+B this time).
-
-Unfortunately, due to a Windows 10 bug, this step will likely fail with a Blue Screen Of Death reporting `PAGE_FAULT_IN_NONPAGED_AREA`, and then go into a boot loop.
-
-This appears to happen when the system page file is located on the iSCSI device. While locating the page file on iSCSI worked fine under Windows 7, it appears to be broken in Windows 10. Unfortunately, Windows defaults to setting up a page file on the primary disk, so when the primary disk is iSCSI, it is broken out-of-the-box.
-
-(Note that the stop code `PAGE_FAULT_IN_NONPAGED_AREA` does not _necessarily_ relate to the system page file in general, despite containing the word "page". This stop code is more like the NT kernel's version of "Segmentation Fault", a general invalid memory access. But, in my specific case, it coincidentally turned out to be related to the page file.)
-
-I was able to solve the problem by disabling the page file entirely. (It also works to locate the page file on a local disk, if one exists, but this is easier to configure after getting the OS up and running with no page file.)
-
-**Disabling page file offline**
-
-Since your machine is not bootable, you cannot disable the page file through the UI. Luckily, it's easy to disable the page file via the registry. To do so, locate the following registry key, and set its value to be empty:
-
-    HKEY_LOCAL_MACHINE\SYSTEM\ControlSet001\Control\Session Manager\Memory Management\PagingFiles
-
-If your registry contains `ControlSet002` and/or `CurrentControlSet` in addition to `ControlSet001`, make sure to make the same changes to those.
-
-**Editing registry offline**
-
-But how do we edit the registry without booting? There are multiple approaches. The easiest thing to do is use an existing, working, Windows 10 machine (e.g. a laptop or even a VM) to mount the iSCSI volume and run regedit on it. Note that in order to permit this other machine to mount the iSCSI volume, you will need to run:
-
-    lanparty authorize-addr HOST ADDR
-
-where `HOST` is the hostname that normally boots from this disk, and `ADDR` is the IP address of the machine that needs to access it. Otherwise, normally the iSCSI volumes are only exposed to their respective machines' addresses.
-
-In order to edit a registry offline (i.e., edit a registry other than the one of the system that is running regedit):
-
-1. Run `regedit` ("Registry Editor") normally.
-2. Click on `HKEY_LOCAL_MACHINE`.
-3. Go to "File > Load Hive...".
-4. Browse to the offline Windows installation, and choose the file `Windows\System32\config\SYSTEM`.
-5. When prompted, type any arbitrary name, like "OFFLINE_SYSTEM".
-
-The offline registry file will appear in the tree under `HKEY_LOCAL_MACHINE` with the name you chose. Edits you make to keys within it will usually be saved automatically, although it is advised that you explicitly unload the offline hive before closing regedit to be sure. This is a very strange UI, but that's apparently how it is done.
+I won't cover the details of installing Windows in this guide, since it's common knowledge.
 
 ### Avoiding Microsoft Sign-in
+
+*Note: This section is about Windows 10 specifically. I've heard mixed reports on whether this is still possible in Windows 11. I have not tried Windows 11 yet.*
 
 When Windows 10 boots for the first time, it'll try to force you to sign in with a Microsoft account. This is NOT what you want. Your machines are intended for use by guests, and you probably don't want to force your guests to log into their own Microsoft account. You could set up Windows using an online account and then create a local account later, but it's much cleaner to avoid signing into an online account at all.
 
@@ -534,11 +451,92 @@ Once you've gotten past account creation, you can unblock the machine like so:
 
     iptables -D FORWARD -s cutman -j DROP
 
-### Set Up Windows 10
+### Preparing for iSCSI
 
-Once your account is created, and you've said "no" to all of Microsoft's myriad requests to surveil you, Windows 10 will finish setting up.
+Once Windows is running, we need to do two things before we can transfer the image to iSCSI:
 
-From here it's up to you to install apps and configure your machine however you want.
+**Install updates and drivers**
+
+You should install all available Windows Updates, and especilaly try to make sure you have the latest drivers for your network hardware in particular. iSCSI boot is sensitive to network driver problems.
+
+**Disable the page file**
+
+If Windows tries to boot from iSCSI with the paging file located on the iSCSI device, it will BSOD with `PAGE_FAULT_IN_NONPAGED_AREA`. Even if it did work, you probably don't actually want to be paging to a network volume. So, disable the page file now:
+
+* Open "View advanced system settings" via the search bar.
+* Under the "Advanced" tab, in the box titled "Performance", click "Settings...".
+* You are now in "Performace Options". In this window, once again go to the "Advanced" tab, and under the "Virtual Memory" box, click "Change...".
+* Uncheck "Automatically manage paging file size for all drives".
+* For each drive, choose the radio button for "No paging file", then click the button "Set".
+* Click "OK" until all dialog boxes are closed.
+* Reboot. (I've observed that Windows tends to BSOD on the first reboot with `PAGE_FAULT_IN_NONPAGED_AREA`, which is disturbingly the same error that you'd get if you had paging enabled on iSCSI. But this error seems to happen just once, and on the next reboot it works fine...)
+
+(Once you're on iSCSI, if your machines additionally have local disks, you could potentially re-enable the paging files on those local disks.)
+
+### Extract the image
+
+Now you need to copy your disk image over to your server. There are a lot of ways to do this, maybe you have a favorite.
+
+My approach was to boot from an Ubuntu installer USB stick, choose the "try Ubuntu" option to start the live environment. Here I opened a terminal and used `dd` and `ssh` to extract the image and push it over the network:
+
+    dd if=/dev/nvme0n1 bs=1M count=65536 status=progress | ssh 10.0.0.1 'cat > win-disk-image'
+
+This assumes you told Windows to install into the first 64GB of your first NVMe disk and that your server is at 10.0.0.1. Change according to your configuration.
+
+This will drop the whole image into a file called `win-disk-image` in your home directory on the server. In a separate step, you can write this into your master image block device on your server:
+
+    dd if=win-disk-image of=/dev/lanparty-disks/master status=progress oflag=sync
+
+*Aside: Ever wonder what it is that `dd` does exactly? It's actually just a glorified `cat`! It has options to control exactly how many bytes to read and write at a time (`bs`), disable caching (`oflag=sync`), limit the exact number of blocks transferred (`count=`), etc. But really, you could just use `cat` (or `head` for a prefix) and it'd work fine, other than being a bit less efficient.*
+
+### Wipe the original drive
+
+It's a good idea to totally wipe the local disk once you've pulled the image off it. Delete the partition table. Otherwise, Windows gets confused when it boots up and finds the same UUID on two different partitions (one on iSCSI, one local). And anyway, it's best if your local disk is not bootable when you go to try to netboot.
+
+### Fix the GPT partition table
+
+When you copied over that disk image, it included the whole partition table for your disk. Unfortunately, modern GPT partition tables bake the device size into the table itself. If your netboot master device has a different size than the local disk you installed onto, Windows' partition manager will be confused. Let's fix up the table before that happens.
+
+(TODO: Figure out how to do this, document it.)
+
+## Your first netboot
+
+Now that your master image is in place, you should be able to netboot from it! (And then there's some more setup to do...)
+
+### Enter "updates" mode
+
+Whenever you want to make changes to your master image that you intend to keep, you need to use the `lanparty` script to set up your server in "updates" mode.
+
+Run:
+
+    lanparty start-updates HOST
+
+Replace HOST with the hostname of the machine you'll be using for installation.
+
+### Start your machine
+
+Start up the machine you chose. Make sure that the BIOS is configured to netboot. This may involve enabling the "network option ROM" or some other network-related settings in the BIOS, before the network adapter appears as a boot option. (If you have a local disk, it's a good idea to make sure it is not bootable at all by deleting its partition table; I've found that simply removing it as a boot option in the BIOS doesn't necessarily prevent all BIOSes from going ahead and trying to boot from the disk anyway.)
+
+If all went according to plan, your machine should boot up! Here's a little breakdown of the Rube Goldbergian machine that makes this happen:
+
+1. Your BIOS delegates to your network firmware to boot.
+2. The network firmware uses DHCP to get an IP address.
+3. The DHCP server, in its response, also tells the firmware that it should download and run the file `ipxe` from the server using the TFTP protocol.
+4. The firmware downloads `ipxe` into memory and executes it.
+5. iPXE takes over, and begins the process anew. It begins a brand new DHCP query.
+6. This time, the DHCP server notices the client is iPXE, and returns _different_ instructions. This time, it instructs the client to "SAN-boot" from the iSCSI volume. iPXE knows how to do this, whereas your netork firmware probably did not (unless you have a very expensive enterprise NIC).
+7. iPXE populates something called the iBFT (iSCSI Boot Firmware Table) -- a magical chunk of memory -- with parameters needed to reconnect to the iSCSI server.
+8. iPXE initiates the UEFI boot process with the iSCSI device as the source. iPXE provides a temporary iSCSI-based disk driver for use in this process. UEFI boot uses this to load the Windows kernel and critical device drivers.
+9. When the Windows kernel starts, the previous iSCSI connection is dropped. Windows, however, sees the iBFT and is able to form a new iSCSI connection based on the parameters stored there.
+10. Windows continues to boot normally with the iSCSI session providing the primary disk.
+
+### Resize your disk
+
+Use the Windows disk partition tool to resize the master partition to use all available space, so that you're no longer limited to 64GB.
+
+### Install software
+
+Whatever you want to install, go ahead and install it. (You can also do this later.)
 
 ### Set up SSH
 
@@ -593,9 +591,29 @@ Once the machine has fully powered off, it's time to merge your installation int
 
 This will take a while, but you'll see progress updates on-screen as it goes.
 
-### Register Windows licenses
+### Test booting all machines (and license Windows)
+
+Configure your server to be ready to boot any or all of your machines:
+
+    lanparty init
+
+If they're already configured for netboot and ethernet wakeup in the BIOS settings, you should even be able to boot them all at once:
+
+    lanparty boot
+
+Alternatively, you can go around pressing the power buttons to boot machines individually, configuring each BIOS as you go.
 
 The first time you boot each machine into Windows 10 (e.g. following the instructions in the next section), it will recognize that the machine is not licensed and complain. Go through the normal process to acquire a Windows 10 license for that machine. Once licensed, the machine is registered in Microsoft's database, so it will never ask you again. Yes, this seems to imply that the machines will phone home to Microsoft for a license check every time you re-initialize their images from the master image, which is sort of disturbing... but it's a whole lot more convenient than what was needed with previous versions!
+
+With all licenses obtained, you can shut down all the machines at once:
+
+    lanparty shutdown
+
+Once they are all off, delete the overlays:
+
+    lanparty destroy
+
+If all went well, you should be ready for a party.
 
 ## LAN party operations
 
