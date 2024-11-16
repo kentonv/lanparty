@@ -11,7 +11,7 @@
 
 ## Introduction
 
-My house ([see below](#background-my-house)) features twelve identical machines used for LAN parties. This repository contains the script I use to manage them, and a guide to creating a similar setup. I use this for gaming, but the setup could be just as useful for office machines, internet cafes, school computer labs, and the like.
+[My house](https://lanparty.house) features 22 identical machines used for LAN parties. This repository contains the script I use to manage them, and a guide to creating a similar setup. I use this for gaming, but the setup could be just as useful for office machines, internet cafes, school computer labs, and the like.
 
 ## The Magic Sauce
 
@@ -48,45 +48,3 @@ This repository contains the script I use to manage the computers, as well as a 
 * Install Windows 10 directly to an iSCSI device.
 
 [To get started, see the guide »](guide.md)
-
-## Background: My House
-
-**UPDATE:** _I sold this house in early 2020 and moved to Austin, TX, where I plan to build a new LAN party house._
-
-In 2011 I built a house in Palo Alto, California optimized for LAN parties. It has computer stations built into the walls.
-
-They fold up and look nice when not in use:
-
-![Photo showing six monitors surrounded by maple wood paneling along a curved wall.](photos/photo1.jpeg)
-
-And they fold out like this:
-
-![Photo showing that the paneling folds out and monitors slide down to form computer stations.](photos/photo2.jpeg)
-
-Another room has six more:
-
-![Photo showing another room with similar game stations along the walls.](photos/photo3.jpeg)
-
-The actual game machines are on a rack in the back room, along with the server.
-
-![Photo of a server rack full of 3U computers.](photos/rack1.jpeg) ![Side view of the server rack, revealing that the machines are named after Mega Man bosses.](photos/rack2.jpeg)
-
-Cable tubes run from the server room to all the machines, allowing cabling to be upgraded as needed. Currently, I run very long HDMI and USB cables through these tubes.
-
-The house is designed by master architect [Richard Varda, FAIA](https://vardaarchitecture.com/) (my father). The game station paneling and all techincal details were designed by me.
-
-I wrote about the house way back in 2011:
-
-* [Original reveal blog post](http://kentonsprojects.blogspot.com/2011/12/lan-party-optimized-house.html)
-* [The back story](http://kentonsprojects.blogspot.com/2011/12/lan-party-house-back-story.html)
-* [Technical design and FAQ](http://kentonsprojects.blogspot.com/2011/12/lan-party-house-technical-design-and.html)
-
-The house was covered in the media at that time, based on my blog posts:
-
-* [Hacker News](https://news.ycombinator.com/item?id=3342044)
-* [Reddit](https://www.reddit.com/r/gaming/comments/na0vv/lanparty_optimized_house/)
-* [The Mary Sue](https://www.themarysue.com/google-engineer-lan-party-house/) ← I like the writing here.
-* [New Atlas](https://newatlas.com/google-engineer-builds-ultimate-lan-party-house/20833/)
-* [Kotaku](https://kotaku.com/this-house-was-built-for-lan-parties-5867502)
-* [Engadget](https://www.engadget.com/2011/12/15/google-employee-creates-the-ultimate-lan-party-house-lives-la-v/)
-* [AOL](https://www.aol.com/2011/12/19/google-engineer-turns-home-into-gamers-fantasy-lan/)
