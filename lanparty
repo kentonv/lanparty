@@ -255,7 +255,7 @@ stop-iscsi() {
   if pidof tgtd > /dev/null; then
     NEED_SLEEP=no
     for MACHINE in "$@"; do
-      TID=${HOST_TO_NUMBER[$MACHINE]}
+      TID=${HOST_TO_TID[$MACHINE]}
       # Check if the target is currently online.
       if tgtadm -C 0 --lld iscsi --op show --mode target --tid $TID > /dev/null 2>&1; then
         # It is, so disable it.
@@ -384,7 +384,7 @@ start-iscsi() {
     # Apparently we must assign a "target ID" number to each machine even though it also has a
     # name. Why? Probably because the names are IQNs which are so unweildy that no one wants to
     # use them. Fine, whatever, we have ID numbers for each host, we'll use those.
-    TID=${HOST_TO_NUMBER[$MACHINE]}
+    TID=${HOST_TO_TID[$MACHINE]}
 
     # Create the target.
     doit tgtadm -C 0 --lld iscsi --op new --mode target --tid $TID -T $ISCSI_TARGET_PREFIX:$MACHINE
@@ -410,12 +410,12 @@ start-iscsi() {
     # Permit the designated machine's IP (and no others) to access this target. Note that this in
     # itself doesn't provide any security since typically anyone on the internal network can claim
     # to be this IP address. It does, however, prevent mistakes.
-    doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I $IP_PREFIX.$TID
+    doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid $TID -I $IP_PREFIX.${HOST_TO_NUMBER[$MACHINE]}
   done
 }
 
 authorize-addr() {
-  doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid ${HOST_TO_NUMBER[$1]} -I $2
+  doit tgtadm -C 0 --lld iscsi --op bind --mode target --tid ${HOST_TO_TID[$1]} -I $2
 }
 
 boot-hosts() {
@@ -1045,13 +1045,21 @@ if [ -e "$CONFIG_NAME" -a $SKIP_CONFIG != yes ]; then
   declare -a HOSTNAMES           # Array of netboot hostnames.
   declare -a ALL_HOSTNAMES       # Array of all hostnames, in order of declaration.
   declare -a UNMANAGED_HOSTNAMES # Hostnames that are NOT netboot.
-  declare -A HOST_TO_NUMBER      # Maps hostnames to ID numbers.
+  declare -A HOST_TO_NUMBER      # Maps hostnames to ID numbers for IP address.
+  declare -A HOST_TO_TID         # Maps hostnames to ID numbers for iSCSI TIDs.
   declare -A HOST_TO_MACADDR     # Maps hostnames to MAC addresses.
 
   while read HOSTNAME NUMBER MACADDR JUNK; do
     if [ "$HOSTNAME" != "" ]; then
       ALL_HOSTNAMES+=("$HOSTNAME")
       HOST_TO_NUMBER[$HOSTNAME]=$NUMBER
+      if [ "$NUMBER" -eq 0 ]; then
+        # 0 is not a valid TID, but I would like it to work as a machine ID.
+        # No one is using this script to manage 1000+ machines right?
+        HOST_TO_TID[$HOSTNAME]=1000
+      else
+        HOST_TO_TID[$HOSTNAME]=$NUMBER
+      fi
       HOST_TO_MACADDR[$HOSTNAME]=$MACADDR
     fi
   done <<< "$MACHINE_TABLE"
