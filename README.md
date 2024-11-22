@@ -5,7 +5,6 @@
 - [Introduction](#introduction)
 - [The Magic Sauce](#the-magic-sauce)
 - [How to do it yourself](#how-to-do-it-yourself)
-- [Background: My House](#background-my-house)
 
 <!-- /TOC -->
 
