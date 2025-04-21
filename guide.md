@@ -700,7 +700,7 @@ The `lanparty status` command can be used to monitor the current overlay usage o
 
 If your per-machine overlays are small, make sure to remind your guests not to install new stuff to the machines.
 
-When installing updates, all overlay space is dedicated to the update machine rather than split among the fleet, so you have much more headroom. Ideally, your total overlay space is larger than your master image, in which case you have nothing to worry about at all. But, if not, it's a good idea to keep an eye on the overlay usage, which you can do again using `lanparty status`. If usage gets close to 100%, you should shut down the machine, merge what you have so far, and then start updates again. If you accidentally use up the overlay during udpates mode, you will have to start updates over from scratch, which is a pretty horrible thing to discover right before your party is supposed to start!
+When installing updates, all overlay space is dedicated to the update machine rather than split among the fleet, so you have much more headroom. Ideally, your total overlay space is larger than your master image, in which case you have nothing to worry about at all. But, if not, it's a good idea to keep an eye on the overlay usage, which you can do again using `lanparty status`. If usage gets close to 100%, you should shut down the machine, merge what you have so far, and then start updates again. If you accidentally use up the overlay during updates mode, you will have to start updates over from scratch, which is a pretty horrible thing to discover right before your party is supposed to start!
 
 ### Steam Update Schedule
 
