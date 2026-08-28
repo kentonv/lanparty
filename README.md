@@ -14,7 +14,7 @@
 
 ## The Magic Sauce
 
-Normally, maintaining twelve machines used by random guests would have two huge problems:
+Normally, maintaining 22 machines used by random guests would have two huge problems:
 
 * Every machine would need to be updated before each party. With games regularly pushing multi-GB updates these days, this would take forever.
 * Guests could easily mess up a machine at a party, requiring me to wipe it and start over, taking even more time.
